@@ -21,12 +21,10 @@ RIGHT_MOTOR_PINS = [5, 6, 13, 19]  # IN1, IN2, IN3, IN4
 # =============================================================================
 
 # Steps required to move 1 cm forward
-# Rough estimate: 4096 steps/rev, 32.5mm wheel = ~130 steps/cm
-STEPS_PER_CM = 130.0  # TODO: Calibrate with actual measurement
+STEPS_PER_CM = 365.7
 
 # Steps required to rotate 1 degree (pivot turn)
-# Rough estimate based on track width ~90mm: ~30 steps/degree
-STEPS_PER_DEGREE = 30.0  # TODO: Calibrate with actual measurement
+STEPS_PER_DEGREE = 62.0  # TODO: Calibrate with actual measurement
 
 # =============================================================================
 # Motor Timing
