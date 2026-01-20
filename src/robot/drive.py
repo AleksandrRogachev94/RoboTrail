@@ -3,6 +3,8 @@
 Provides intuitive commands like forward(cm) and turn(degrees).
 """
 
+import time
+
 from robot.config import (
     DEFAULT_STEP_DELAY,
     LEFT_MOTOR_PINS,
@@ -39,8 +41,9 @@ class Robot:
         direction = 1 if cm > 0 else -1
 
         for _ in range(steps):
-            self.left.step(direction, delay)
-            self.right.step(direction, delay)
+            self.left.step(direction)
+            self.right.step(direction)
+            time.sleep(delay)
 
     def backward(self, cm: float, delay: float = DEFAULT_STEP_DELAY) -> None:
         """Drive backward by specified distance."""
@@ -60,8 +63,9 @@ class Robot:
         right_dir = -1 if degrees > 0 else 1
 
         for _ in range(steps):
-            self.left.step(left_dir, delay)
-            self.right.step(right_dir, delay)
+            self.left.step(left_dir)
+            self.right.step(right_dir)
+            time.sleep(delay)
 
     def stop(self) -> None:
         """Stop both motors and release holding torque."""

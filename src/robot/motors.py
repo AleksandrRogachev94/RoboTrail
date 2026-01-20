@@ -4,8 +4,6 @@ This module only understands steps - no knowledge of cm or degrees.
 Use drive.py for high-level movement commands.
 """
 
-import time
-
 import lgpio
 
 # Half-step sequence (8 steps per cycle, smoother movement, more torque)
@@ -40,24 +38,18 @@ class Stepper:
         for pin in pins:
             lgpio.gpio_claim_output(chip, pin)
 
-    def step(self, steps: int, delay: float = 0.001) -> None:
+    def step(self, direction: int = 1) -> None:
         """
-        Move motor by given number of steps.
+        Advance motor by one step.
 
         Args:
-            steps: Number of steps (positive=forward, negative=backward)
-            delay: Seconds between steps (default 1ms)
+            direction: 1 for forward, -1 for backward
         """
-        direction = 1 if steps > 0 else -1
+        self.step_index = (self.step_index + direction) % len(HALF_STEP_SEQ)
+        seq = HALF_STEP_SEQ[self.step_index]
 
-        for _ in range(abs(steps)):
-            self.step_index = (self.step_index + direction) % len(HALF_STEP_SEQ)
-            seq = HALF_STEP_SEQ[self.step_index]
-
-            for pin, val in zip(self.pins, seq):
-                lgpio.gpio_write(self.chip, pin, val)
-
-            time.sleep(delay)
+        for pin, val in zip(self.pins, seq):
+            lgpio.gpio_write(self.chip, pin, val)
 
     def stop(self) -> None:
         """Turn off all coils (saves power, loses holding torque)."""
