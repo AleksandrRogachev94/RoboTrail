@@ -151,7 +151,7 @@ def test_direction(settle_delay=None):
 if __name__ == "__main__":
     # Uncomment the test you want to run:
 
-    # test_timing_budget()
-    # test_num_points()
-    # test_settle_delay()
+    test_timing_budget()
+    test_num_points()
+    test_settle_delay()
     test_direction()
