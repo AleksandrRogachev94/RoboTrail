@@ -25,7 +25,6 @@ def plot_comparison_cartesian(results, title, filename):
             alpha=0.7,
         )
 
-    plt.axis("equal")
     plt.grid(True, alpha=0.3)
     plt.legend(loc="upper right")
     plt.title(title)
