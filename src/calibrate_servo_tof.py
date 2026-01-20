@@ -16,12 +16,13 @@ def plot_comparison_cartesian(results, title, filename):
 
     colors = ["red", "blue", "green", "orange", "purple", "cyan"]
     for (scan_points, label), color in zip(results, colors):
-        plt.scatter(
+        plt.plot(
             scan_points[:, 0],
             scan_points[:, 1],
+            "o-",
             label=label,
             color=color,
-            s=30,
+            markersize=4,
             alpha=0.7,
         )
 
