@@ -81,7 +81,7 @@ def test_num_points():
         scanner = Scanner(
             num_points=cfg["num_points"],
             timing_budget=100,
-            settle_delay=0,
+            settle_delay=0.05,
             servo_reversed=True,
         )
         start = time.time()
@@ -100,10 +100,10 @@ def test_num_points():
 def test_settle_delay():
     configs = [
         {"settle_delay": 0.00, "label": "0ms"},
-        {"settle_delay": 0.01, "label": "0.05ms"},
-        {"settle_delay": 0.05, "label": "0.05ms"},
-        {"settle_delay": 0.1, "label": "0.1s"},
-        {"settle_delay": 0.2, "label": "0.2s"},
+        {"settle_delay": 0.01, "label": "10ms"},
+        {"settle_delay": 0.05, "label": "50ms"},
+        {"settle_delay": 0.1, "label": "100ms"},
+        {"settle_delay": 0.2, "label": "200ms"},
     ]
     results = []
     for cfg in configs:
@@ -125,6 +125,42 @@ def test_settle_delay():
 
 
 # ============================================================
+# TEST 4: Compare forward vs backward scan direction
+# If they match, settle_delay is sufficient
+# ============================================================
+def test_direction(settle_delay=0.05):
+    """Compare forward and backward scans to verify servo settle time."""
+    scanner = Scanner(
+        num_points=20,
+        timing_budget=100,
+        settle_delay=settle_delay,
+        servo_reversed=True,
+    )
+
+    print(f"Testing direction with settle_delay={settle_delay}s")
+
+    # Forward scan (-60 to +60)
+    print("Forward scan...")
+    start = time.time()
+    forward = scanner.scan(from_angle=-60, to_angle=60)
+    forward_time = time.time() - start
+
+    # Backward scan (+60 to -60)
+    print("Backward scan...")
+    start = time.time()
+    backward = scanner.scan(from_angle=60, to_angle=-60)
+    backward_time = time.time() - start
+
+    results = [
+        (forward, f"Forward ({forward_time:.1f}s)"),
+        (backward, f"Backward ({backward_time:.1f}s)"),
+    ]
+    plot_comparison_cartesian(
+        results, f"Direction Test (settle={settle_delay}s)", "test_direction.png"
+    )
+
+
+# ============================================================
 # Run whichever test you want
 # ============================================================
 if __name__ == "__main__":
@@ -133,3 +169,4 @@ if __name__ == "__main__":
     test_timing_budget()
     test_num_points()
     test_settle_delay()
+    test_direction(settle_delay=0.05)

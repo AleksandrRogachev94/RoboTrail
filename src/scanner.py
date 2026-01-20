@@ -30,12 +30,22 @@ class Scanner:
 
         self.servo = HWServo(channel=2, reversed=servo_reversed)
 
-    def scan(self):
-        self.servo.set_angle(-60)
+    def scan(self, from_angle=-60, to_angle=60):
+        """
+        Scan from from_angle to to_angle.
+
+        Args:
+            from_angle: Starting angle in degrees (default -60)
+            to_angle: Ending angle in degrees (default 60)
+
+        Returns:
+            numpy array of shape (N, 2) with x, y coordinates in cm
+        """
+        self.servo.set_angle(from_angle)
         self.vl53.start_ranging()
         time.sleep(0.5)
 
-        angles = np.linspace(-60, 60, num=self.num_points)
+        angles = np.linspace(from_angle, to_angle, num=self.num_points)
         distances = []
 
         for angle in angles:
@@ -52,17 +62,14 @@ class Scanner:
 
         cartesian = []
         for i, angle in enumerate(angles):
-            angle = math.radians(angle)
+            angle_rad = math.radians(angle)
             distance = distances[i]
             if distance is None:
                 continue
-            x = distance * math.sin(angle)
-            y = distance * math.cos(angle)
+            x = distance * math.sin(angle_rad)
+            y = distance * math.cos(angle_rad)
             cartesian.append([x, y])
 
-        print("Angles and distances:")
-        for i, angle in enumerate(angles):
-            print(f"  {angle:6.1f}°: {distances[i]} cm")
         return np.array(cartesian)
 
 
