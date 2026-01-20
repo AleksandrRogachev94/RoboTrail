@@ -9,12 +9,13 @@ import numpy as np
 from sensors.servo import HWServo
 
 
+# Default parameters are optimal calibrated values
 class Scanner:
     def __init__(
         self,
         num_points=20,
         timing_budget=50,
-        settle_delay=0.01,
+        settle_delay=0.05,
         distance_mode=2,
         servo_reversed=False,
     ):

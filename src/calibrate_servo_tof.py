@@ -41,10 +41,10 @@ def plot_comparison_cartesian(results, title, filename):
 # ============================================================
 def test_timing_budget():
     configs = [
-        {"timing_budget": 20, "label": "20ms"},
         {"timing_budget": 33, "label": "33ms"},
         {"timing_budget": 50, "label": "50ms"},
         {"timing_budget": 100, "label": "100ms"},
+        {"timing_budget": 200, "label": "200ms"},
     ]
     results = []
     for cfg in configs:
@@ -52,7 +52,7 @@ def test_timing_budget():
         scanner = Scanner(
             num_points=20,
             timing_budget=cfg["timing_budget"],
-            settle_delay=0,
+            settle_delay=0.05,
             servo_reversed=True,
         )
         start = time.time()
@@ -71,16 +71,16 @@ def test_timing_budget():
 def test_num_points():
     configs = [
         {"num_points": 10, "label": "10 pts"},
-        {"num_points": 15, "label": "15 pts"},
         {"num_points": 20, "label": "20 pts"},
         {"num_points": 30, "label": "30 pts"},
+        {"num_points": 40, "label": "40 pts"},
     ]
     results = []
     for cfg in configs:
         print(f"Scanning: {cfg['label']}")
         scanner = Scanner(
             num_points=cfg["num_points"],
-            timing_budget=50,
+            timing_budget=100,
             settle_delay=0,
             servo_reversed=True,
         )
@@ -100,16 +100,17 @@ def test_num_points():
 def test_settle_delay():
     configs = [
         {"settle_delay": 0.00, "label": "0ms"},
-        {"settle_delay": 0.01, "label": "10ms"},
-        {"settle_delay": 0.02, "label": "20ms"},
-        {"settle_delay": 0.05, "label": "50ms"},
+        {"settle_delay": 0.01, "label": "0.05ms"},
+        {"settle_delay": 0.05, "label": "0.05ms"},
+        {"settle_delay": 0.1, "label": "0.1s"},
+        {"settle_delay": 0.2, "label": "0.2s"},
     ]
     results = []
     for cfg in configs:
         print(f"Scanning: {cfg['label']}")
         scanner = Scanner(
             num_points=20,
-            timing_budget=50,
+            timing_budget=100,
             settle_delay=cfg["settle_delay"],
             servo_reversed=True,
         )
