@@ -49,12 +49,7 @@ def test_timing_budget():
     results = []
     for cfg in configs:
         print(f"Scanning: {cfg['label']}")
-        scanner = Scanner(
-            num_points=20,
-            timing_budget=cfg["timing_budget"],
-            settle_delay=0.05,
-            servo_reversed=True,
-        )
+        scanner = Scanner(timing_budget=cfg["timing_budget"])
         start = time.time()
         scan_points = scanner.scan()
         elapsed = time.time() - start
@@ -78,12 +73,7 @@ def test_num_points():
     results = []
     for cfg in configs:
         print(f"Scanning: {cfg['label']}")
-        scanner = Scanner(
-            num_points=cfg["num_points"],
-            timing_budget=100,
-            settle_delay=0.05,
-            servo_reversed=True,
-        )
+        scanner = Scanner(num_points=cfg["num_points"])
         start = time.time()
         scan_points = scanner.scan()
         elapsed = time.time() - start
@@ -108,12 +98,7 @@ def test_settle_delay():
     results = []
     for cfg in configs:
         print(f"Scanning: {cfg['label']}")
-        scanner = Scanner(
-            num_points=20,
-            timing_budget=100,
-            settle_delay=cfg["settle_delay"],
-            servo_reversed=True,
-        )
+        scanner = Scanner(settle_delay=cfg["settle_delay"])
         start = time.time()
         scan_points = scanner.scan()
         elapsed = time.time() - start
@@ -128,14 +113,14 @@ def test_settle_delay():
 # TEST 4: Compare forward vs backward scan direction
 # If they match, settle_delay is sufficient
 # ============================================================
-def test_direction(settle_delay=0.05):
+def test_direction(settle_delay=None):
     """Compare forward and backward scans to verify servo settle time."""
-    scanner = Scanner(
-        num_points=20,
-        timing_budget=100,
-        settle_delay=settle_delay,
-        servo_reversed=True,
-    )
+    # Use provided settle_delay or Scanner default
+    if settle_delay is not None:
+        scanner = Scanner(settle_delay=settle_delay)
+    else:
+        scanner = Scanner()
+        settle_delay = scanner.settle_delay
 
     print(f"Testing direction with settle_delay={settle_delay}s")
 
@@ -166,7 +151,7 @@ def test_direction(settle_delay=0.05):
 if __name__ == "__main__":
     # Uncomment the test you want to run:
 
-    test_timing_budget()
-    test_num_points()
-    test_settle_delay()
-    test_direction(settle_delay=0.05)
+    # test_timing_budget()
+    # test_num_points()
+    # test_settle_delay()
+    test_direction()

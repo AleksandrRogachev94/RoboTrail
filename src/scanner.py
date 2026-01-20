@@ -14,10 +14,10 @@ class Scanner:
     def __init__(
         self,
         num_points=20,
-        timing_budget=50,
-        settle_delay=0.05,
+        timing_budget=100,
+        settle_delay=0.2,
         distance_mode=2,
-        servo_reversed=False,
+        servo_reversed=True,
     ):
         print("initializing scanner")
         self.num_points = num_points
@@ -74,7 +74,7 @@ class Scanner:
 
 
 if __name__ == "__main__":
-    scan = Scanner(servo_reversed=True).scan()
+    scan = Scanner().scan()
 
     print(scan.shape)
 
