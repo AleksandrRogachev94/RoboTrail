@@ -52,9 +52,14 @@ class Scanner:
             self.servo.set_angle(angle)
             time.sleep(self.settle_delay)
 
+            # Discard stale reading (captured during servo motion)
             while not self.vl53.data_ready:
                 time.sleep(0.001)
+            self.vl53.clear_interrupt()
 
+            # Capture fresh reading (started after servo settled)
+            while not self.vl53.data_ready:
+                time.sleep(0.001)
             distances.append(self.vl53.distance)
             self.vl53.clear_interrupt()
 
