@@ -15,7 +15,7 @@ class Scanner:
         self,
         num_points=20,
         timing_budget=100,
-        settle_delay=0.2,
+        settle_delay=0.01,
         distance_mode=2,
         servo_reversed=True,
     ):
@@ -80,8 +80,6 @@ class Scanner:
 
 if __name__ == "__main__":
     scan = Scanner().scan()
-
-    print(scan.shape)
 
     # Create the scatter plot
     plt.scatter(scan[:, 0], scan[:, 1])
