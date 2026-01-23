@@ -16,7 +16,7 @@ Build a low-cost, 3D-printed robot that uses **sensor fusion** (not just a camer
 | ------------------- | ------------------ | ------------------------------------ |
 | **Computer**        | Raspberry Pi 5     | Main processing                      |
 | **Chassis**         | SMARS (3D printed) | Robot frame                          |
-| **Motors**          | 28BYJ-48 + ULN2003 | Precise movement via stepper control |
+| **Motors**          | N20 + TB6612FNG    | DC motors with encoders for odometry |
 | **Distance Sensor** | VL53L1X ToF        | Laser ranging up to 4m (the "lidar") |
 | **IMU**             | MPU-6050           | Gyroscope for rotation tracking      |
 | **Servo**           | SG90               | Pan the ToF sensor for 180° scans    |
@@ -79,21 +79,77 @@ SLAM answers two questions at once: _"Where am I?"_ (localization) and _"What do
 
 ---
 
-### Stage 3: Sensor Fusion / PID (Accurate Movement)
+### Stage 3: DC Motors & PID Control
 
-**Goal:** Drive straight without drifting, and turn precisely.
+**Goal:** Upgrade to DC motors with encoder feedback and PID control for accurate movement.
 
-**What you'll learn:** Reading IMU data, implementing a PID feedback loop, sensor fusion basics.
+**What you'll learn:** Encoder-based odometry, PID velocity control, IMU sensor fusion, control loop architecture.
 
-- Read heading from MPU-6050 gyroscope
-- Implement PID controller to correct wheel speeds during straight-line movement
-- When gyro detects drift left, speed up right wheel (and vice versa)
-- Use gyro to verify and correct turns (e.g., command 90° turn, gyro confirms actual rotation)
-- Compare gyro-measured rotation vs. step-based estimate to detect wheel slip
+#### Hardware Changes
 
-**Why it matters for SLAM:** If your movement estimates are wrong, your map will be wrong. The gyro corrects for wheel slip and surface variations—both when driving straight AND when turning. Better movement accuracy = better map accuracy. This is "localization" improvement.
+| Component                   | Purpose                                        |
+| --------------------------- | ---------------------------------------------- |
+| **N20 motors with encoder** | 6V, 150RPM, AB hall encoder (~20 cm/sec at 5V) |
+| **TB6612FNG driver**        | Efficient H-bridge for PWM motor control       |
 
-**Is PID required?** Technically no—you can do SLAM without it. But your maps will be distorted because every small drift accumulates into large errors. PID dramatically improves quality.
+#### Pi 5 Encoder Setup
+
+Use kernel-level encoder counting (Python polling is too slow):
+
+```bash
+# /boot/firmware/config.txt
+dtoverlay=rotary-encoder,pin_a=17,pin_b=18,relative_axis=1  # Left motor
+dtoverlay=rotary-encoder,pin_a=22,pin_b=23,relative_axis=1  # Right motor
+```
+
+Read encoder position from `/dev/input/eventX` using the `evdev` library.
+
+#### Control Architecture
+
+For stop-and-scan SLAM, a simple **single-threaded blocking** approach works best:
+
+```python
+class MotionController:
+    def move(self, distance_cm, heading):
+        """Blocking: PID runs inside until distance reached."""
+        target_ticks = distance_cm * TICKS_PER_CM
+        start = self.encoder.total
+
+        while (self.encoder.total - start) < target_ticks:
+            # Heading PID
+            correction = self.heading_pid.update(heading - self.imu.heading)
+
+            # Velocity PIDs
+            left_pwm = self.left_pid.update(self.left_enc.velocity, speed - correction)
+            right_pwm = self.right_pid.update(self.right_enc.velocity, speed + correction)
+            self.motors.set(left_pwm, right_pwm)
+
+            time.sleep(0.01)  # 100 Hz
+
+        self.motors.stop()
+        # Returns when done
+
+def slam_loop():
+    motion = MotionController()
+    while exploring:
+        motion.move(30, heading)     # Blocking - PID runs inside
+        scan = scanner.sweep_180()   # Robot stopped
+        pose = icp_correct(scan)     # SLAM processing
+        update_map(scan, pose)
+        heading = plan_next()
+```
+
+#### Three PIDs Working Together
+
+| PID                | Input              | Output              | Purpose               |
+| ------------------ | ------------------ | ------------------- | --------------------- |
+| **Left velocity**  | Left encoder rate  | Left motor PWM      | Track target velocity |
+| **Right velocity** | Right encoder rate | Right motor PWM     | Track target velocity |
+| **Heading**        | IMU gyro heading   | Velocity difference | Keep robot straight   |
+
+**Key difference from steppers:** Encoders tell you how far you _actually_ moved, not how far you _commanded_. This is true closed-loop control.
+
+**Why it matters for SLAM:** Accurate odometry = better pose prediction = better scan matching = better maps.
 
 ---
 
@@ -129,12 +185,12 @@ SLAM continuously runs this cycle:
 
 #### How Each Sensor Is Used
 
-| Sensor              | Role in SLAM                                     |
-| ------------------- | ------------------------------------------------ |
-| **Steppers**        | PREDICT: "I commanded 100 steps forward = ~10cm" |
-| **Gyro (MPU-6050)** | PREDICT: "I rotated 45° during that turn"        |
-| **ToF (VL53L1X)**   | SCAN: "Wall is 87cm away at angle 30°"           |
-| **Servo**           | SCAN: Points the ToF at different angles         |
+| Sensor              | Role in SLAM                              |
+| ------------------- | ----------------------------------------- |
+| **Encoders**        | PREDICT: "Wheels moved 200 ticks = ~10cm" |
+| **Gyro (MPU-6050)** | PREDICT: "I rotated 45° during that turn" |
+| **ToF (VL53L1X)**   | SCAN: "Wall is 87cm away at angle 30°"    |
+| **Servo**           | SCAN: Points the ToF at different angles  |
 
 #### How Scanning Works
 
@@ -391,75 +447,6 @@ For room-sized exploration, accumulated error is usually small enough that loop 
 
 ---
 
-### Stage 6.5: DC Motor Upgrade (Optional)
-
-**Goal:** Replace slow steppers with faster DC motors for more realistic robot behavior.
-
-**What you'll learn:** Encoder-based odometry, hardware PWM, kernel-level encoder counting, continuous scanning.
-
-| Component                   | Purpose                                                     |
-| --------------------------- | ----------------------------------------------------------- |
-| **N20 motors with encoder** | 6V, 150RPM, AB hall encoder (~25 cm/sec with 32.5mm wheels) |
-| **TB6612FNG driver**        | Efficient H-bridge for motor control (replaces ULN2003)     |
-
-**Pi 5 Encoder Setup:** Use `dtoverlay=rotary-encoder` for reliable pulse counting at the kernel level (Python polling is too slow for encoder speeds).
-
-```bash
-# /boot/firmware/config.txt
-dtoverlay=rotary-encoder,pin_a=17,pin_b=18,relative_axis=1  # Left motor
-dtoverlay=rotary-encoder,pin_a=22,pin_b=23,relative_axis=1  # Right motor
-```
-
-Read encoder position from `/dev/input/eventX` using the `evdev` library in Python.
-
-**Key difference from steppers:** Instead of counting commanded steps, you count actual encoder pulses—the motor tells you how far it really moved, not how far you told it to move.
-
-#### Sub-phase: Continuous Sweep
-
-With faster motors, stop-and-scan becomes inefficient. Upgrade to scanning while moving:
-
-```python
-def continuous_scan_to_world(distance, servo_angle, timestamp):
-    # Interpolate robot pose at this reading's timestamp
-    pose = interpolate_pose(odometry_buffer, timestamp)
-
-    # Standard coordinate transform
-    world_angle = pose.heading + servo_angle
-    world_x = pose.x + distance * cos(world_angle)
-    world_y = pose.y + distance * sin(world_angle)
-    return (world_x, world_y)
-```
-
-Each ToF reading happens at a different robot position, so you interpolate the pose at each measurement's timestamp. The math is the same as stop-and-scan—just with interpolated poses instead of fixed poses.
-
-#### Sub-phase: Arc Movement
-
-With separate straight/turn movements, the robot stops frequently. Arcs allow smoother, faster paths.
-
-**Differential drive arc math:**
-
-```python
-def update_pose_arc(pose, v_left, v_right, dt, track_width):
-    v = (v_left + v_right) / 2          # Linear velocity
-    omega = (v_right - v_left) / track_width  # Angular velocity
-
-    if abs(omega) < 0.001:  # Going straight
-        pose.x += v * dt * cos(pose.heading)
-        pose.y += v * dt * sin(pose.heading)
-    else:  # Arc
-        pose.x += (v/omega) * (sin(pose.heading + omega*dt) - sin(pose.heading))
-        pose.y += (v/omega) * (cos(pose.heading) - cos(pose.heading + omega*dt))
-        pose.heading += omega * dt
-
-    return pose
-```
-
-**When to use arcs:** Smooth path following from A\* waypoints. Instead of "drive to point, stop, turn, drive to next point", execute a continuous curved path.
-
-> **Note:** Complete Stages 1-6 with steppers first. Once SLAM works, upgrading to DC motors tests whether your algorithms handle noisier, faster odometry.
-
----
-
 ### Stage 7: Semantic Localization (Advanced)
 
 **Goal:** Recognize _where_ you are using visual landmarks.
@@ -635,20 +622,49 @@ pwm.start(7.5)  # 7.5% = center (1.5ms pulse)
 
 ## Wiring Overview
 
+### Option A: DC Motors (N20 + TB6612FNG)
+
+| Connection        | GPIO/Pin                      |
+| ----------------- | ----------------------------- |
+| **TB6612FNG**     |                               |
+| VM                | 6V motor supply               |
+| VCC               | 3.3V                          |
+| GND               | Common ground                 |
+| STBY              | 3.3V (tie high)               |
+| PWMA              | GPIO 12 (software PWM, ~1kHz) |
+| PWMB              | GPIO 16 (software PWM, ~1kHz) |
+| AIN1 / AIN2       | GPIO 20 / 21                  |
+| BIN1 / BIN2       | GPIO 24 / 25                  |
+| A01 / A02         | Left motor (red/white)        |
+| B01 / B02         | Right motor (red/white)       |
+| **Encoders**      |                               |
+| Left encoder A/B  | GPIO 17 / 27                  |
+| Right encoder A/B | GPIO 5 / 6                    |
+| Encoder VCC       | 3.3V                          |
+| Encoder GND       | GND                           |
+
+> [!NOTE]
+> Motors use **software PWM** (lgpio) at ~1kHz to avoid conflict with the servo's hardware PWM on GPIO 18 (50Hz). Motor inductance smooths software PWM jitter.
+
+### Option B: Stepper Motors (28BYJ-48 + ULN2003)
+
+| Connection  | GPIO                |
+| ----------- | ------------------- |
+| Left motor  | GPIO 17, 27, 22, 23 |
+| Right motor | GPIO 5, 6, 13, 19   |
+
+### Common Wiring
+
 ```
 Raspberry Pi 5
-├── I2C Bus
+├── I2C Bus (GPIO 2/3)
 │   ├── VL53L1X (ToF sensor)
 │   ├── MPU-6050 (IMU)
 │   ├── INA219 (battery monitor)
 │   └── SSD1306 (OLED display)
-├── GPIO
-│   ├── ULN2003 #1 (left motor)
-│   ├── ULN2003 #2 (right motor)
-│   ├── Servo (PWM)
-│   └── KY-008 Laser (optional)
-└── Power
-    └── 5V from XL4015 buck converter
+├── Servo (GPIO 18, hardware PWM)
+├── KY-008 Laser (optional)
+└── Power: 5V from XL4015 buck converter
 ```
 
 ## Resources
