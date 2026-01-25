@@ -624,27 +624,27 @@ pwm.start(7.5)  # 7.5% = center (1.5ms pulse)
 
 ### Option A: DC Motors (N20 + TB6612FNG)
 
-| Connection        | GPIO/Pin                      |
-| ----------------- | ----------------------------- |
-| **TB6612FNG**     |                               |
-| VM                | 6V motor supply               |
-| VCC               | 3.3V                          |
-| GND               | Common ground                 |
-| STBY              | 3.3V (tie high)               |
-| PWMA              | GPIO 12 (software PWM, ~1kHz) |
-| PWMB              | GPIO 16 (software PWM, ~1kHz) |
-| AIN1 / AIN2       | GPIO 20 / 21                  |
-| BIN1 / BIN2       | GPIO 24 / 25                  |
-| A01 / A02         | Left motor (red/white)        |
-| B01 / B02         | Right motor (red/white)       |
-| **Encoders**      |                               |
-| Left encoder A/B  | GPIO 17 / 27                  |
-| Right encoder A/B | GPIO 5 / 6                    |
-| Encoder VCC       | 3.3V                          |
-| Encoder GND       | GND                           |
+| Connection        | GPIO/Pin                       |
+| ----------------- | ------------------------------ |
+| **TB6612FNG**     |                                |
+| VM                | 6V motor supply                |
+| VCC               | 3.3V                           |
+| GND               | Common ground                  |
+| STBY              | 3.3V (tie high)                |
+| PWMA              | GPIO 12 (right speed, ~1kHz)   |
+| PWMB              | GPIO 16 (left speed, ~1kHz)    |
+| AIN1 / AIN2       | GPIO 20 / 21 (right direction) |
+| BIN1 / BIN2       | GPIO 25 / 24 (left direction)  |
+| A01 / A02         | Right motor (red/white)        |
+| B01 / B02         | Left motor (red/white)         |
+| **Encoders**      |                                |
+| Left encoder A/B  | GPIO 17 / 27                   |
+| Right encoder A/B | GPIO 5 / 6                     |
+| Encoder VCC       | 3.3V                           |
+| Encoder GND       | GND                            |
 
 > [!NOTE]
-> Motors use **software PWM** (lgpio) at ~1kHz to avoid conflict with the servo's hardware PWM on GPIO 18 (50Hz). Motor inductance smooths software PWM jitter.
+> Motors use **software PWM** (lgpio) at ~1kHz to avoid conflict with the servo's hardware PWM on GPIO 18 (50Hz). BIN1/BIN2 are swapped (25/24) to correct left motor direction.
 
 ### Option B: Stepper Motors (28BYJ-48 + ULN2003)
 
