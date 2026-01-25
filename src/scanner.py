@@ -6,6 +6,7 @@ import board
 import matplotlib.pyplot as plt
 import numpy as np
 
+from robot.config import SERVO_ANGLE_OFFSET
 from sensors.servo import HWServo
 
 
@@ -28,7 +29,9 @@ class Scanner:
         self.vl53.distance_mode = distance_mode
         self.vl53.timing_budget = timing_budget
 
-        self.servo = HWServo(channel=2, reversed=servo_reversed)
+        self.servo = HWServo(
+            channel=2, reversed=servo_reversed, angle_offset=SERVO_ANGLE_OFFSET
+        )
 
     def scan(self, from_angle=-60, to_angle=60):
         """

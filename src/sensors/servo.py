@@ -2,14 +2,16 @@
 
 
 class HWServo:
-    def __init__(self, channel=2, chip=0, reversed=False):
+    def __init__(self, channel=2, chip=0, reversed=False, angle_offset=0.0):
         """
         Args:
             channel: PWM channel (2 for GPIO 18)
             chip: PWM chip number
             reversed: If True, negate angles (for flipped servo mounting)
+            angle_offset: Calibration offset to correct servo 0° to true forward
         """
         self.reversed = reversed
+        self.angle_offset = angle_offset
 
         # Path to PWM control files in Linux sysfs
         # /sys/class/pwm/pwmchip0/pwm2/ for GPIO 18
@@ -37,6 +39,9 @@ class HWServo:
         # Apply reversal if configured (for flipped servo mounting)
         if self.reversed:
             angle = -angle
+
+        # Apply calibration offset
+        angle += self.angle_offset
 
         # Convert angle (-90 to +90) to pulse width in nanoseconds
         # -90° → 500,000 ns  (0.5ms) - full left
