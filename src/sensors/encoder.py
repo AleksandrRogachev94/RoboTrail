@@ -16,14 +16,16 @@ import evdev
 class Encoder:
     """Hardware quadrature encoder reader."""
 
-    def __init__(self, device_path: str):
+    def __init__(self, device_path: str, reversed: bool = False):
         """
         Args:
             device_path: Path to input device (e.g., '/dev/input/event0')
+            reversed: If True, negate position (for motors mounted opposite direction)
         """
         self.device = evdev.InputDevice(device_path)
         self.device.grab()  # Exclusive access
         self._position = 0
+        self._sign = -1 if reversed else 1
 
     @property
     def position(self) -> int:
@@ -44,7 +46,7 @@ class Encoder:
                 if event is None:
                     break
                 if event.type == evdev.ecodes.EV_REL:
-                    self._position += event.value
+                    self._position += event.value * self._sign
         except BlockingIOError:
             pass
 

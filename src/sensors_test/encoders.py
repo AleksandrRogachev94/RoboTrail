@@ -30,7 +30,7 @@ def main():
     print(f"Right: {right_path}")
     print("\nSpin wheels to test. Ctrl+C to stop.\n")
 
-    left = Encoder(left_path)
+    left = Encoder(left_path, reversed=True)
     right = Encoder(right_path)
 
     try:
