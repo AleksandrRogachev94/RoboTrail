@@ -15,7 +15,7 @@ class PID:
         self.kd = kd
         self.output_min = output_min
         self.output_max = output_max
-        self.integral_limit = output_max / ki
+        self.integral_limit = output_max / ki if ki > 0 else 0
         self.reset()
 
     def update(self, error: float, dt: float) -> float:

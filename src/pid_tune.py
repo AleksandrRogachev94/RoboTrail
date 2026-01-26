@@ -27,10 +27,11 @@ from robot.pid import PID
 from sensors.encoder import Encoder, list_encoder_devices
 
 # Config
-TARGET_VELOCITY = 400  # ticks/sec
+TARGET_VELOCITY = 700  # ticks/sec
 COMPANION_PWM = 50  # Fixed PWM for the other motor
 DT = 0.02  # 50 Hz
 DURATION = 5.0  # seconds
+VELOCITY_SAMPLES = 3  # Moving average window for smoothing
 
 
 def main():
@@ -78,6 +79,7 @@ def main():
     last_pos = tune_enc.position
     last_time = time.monotonic()
     start_time = last_time
+    velocity_history = []  # For smoothing
 
     print(f"\nTuning {args.motor} motor: Kp={args.kp}, Ki={args.ki}, Kd={args.kd}")
     print(f"Target: {TARGET_VELOCITY} ticks/sec, Companion at {COMPANION_PWM}% PWM")
@@ -92,9 +94,13 @@ def main():
             now = time.monotonic()
             dt_actual = now - last_time
 
-            # Measure velocity
+            # Measure velocity (with smoothing)
             pos = tune_enc.position
-            velocity = (pos - last_pos) / dt_actual
+            raw_velocity = (pos - last_pos) / dt_actual
+            velocity_history.append(raw_velocity)
+            if len(velocity_history) > VELOCITY_SAMPLES:
+                velocity_history.pop(0)
+            velocity = sum(velocity_history) / len(velocity_history)
 
             # PID
             error = TARGET_VELOCITY - velocity
@@ -113,7 +119,12 @@ def main():
             # Update
             last_pos = pos
             last_time = now
-            time.sleep(DT)
+
+            # Sleep remainder of DT for consistent timing
+            loop_time = time.monotonic() - now
+            sleep_time = DT - loop_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
     except KeyboardInterrupt:
         print("\nInterrupted")
@@ -132,7 +143,12 @@ def main():
         import matplotlib.pyplot as plt
 
         plt.figure(figsize=(10, 4))
-        plt.plot(times, velocities, "b-", label="Velocity")
+
+        # Skip first 0.5 seconds (startup transient)
+        plot_times = [t for t in times if t >= 0.5]
+        plot_vels = [v for t, v in zip(times, velocities) if t >= 0.5]
+
+        plt.plot(plot_times, plot_vels, "b-", label="Velocity")
         plt.axhline(y=TARGET_VELOCITY, color="r", linestyle="--", label="Target")
         plt.xlabel("Time (s)")
         plt.ylabel("Velocity (ticks/s)")
