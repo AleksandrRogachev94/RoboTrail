@@ -36,7 +36,7 @@ def main():
     enc = Encoder(encoders[0][0])
 
     # 3. Setup PID - START WITH P ONLY!
-    pid = PID(kp=0.1, ki=0.0, kd=0.0)
+    pid = PID(kp=0.5, ki=0.0, kd=0.0)
 
     # 4. Control loop variables
     # Initialize last_pos, last_time, start_time
