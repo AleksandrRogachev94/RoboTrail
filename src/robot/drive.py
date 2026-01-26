@@ -7,8 +7,8 @@ import time
 
 from robot.config import (
     DEFAULT_STEP_DELAY,
-    LEFT_MOTOR_PINS,
-    RIGHT_MOTOR_PINS,
+    LEFT_STEPPER_PINS,
+    RIGHT_STEPPER_PINS,
     STEPS_PER_CM,
     STEPS_PER_DEGREE,
 )
@@ -26,8 +26,8 @@ class Robot:
             chip: lgpio chip handle from gpiochip_open()
         """
         self.chip = chip
-        self.left = Stepper(chip, LEFT_MOTOR_PINS)
-        self.right = Stepper(chip, RIGHT_MOTOR_PINS)
+        self.left = Stepper(chip, LEFT_STEPPER_PINS)
+        self.right = Stepper(chip, RIGHT_STEPPER_PINS)
 
     def forward(self, cm: float, delay: float = DEFAULT_STEP_DELAY) -> None:
         """

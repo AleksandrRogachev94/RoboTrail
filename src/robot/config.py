@@ -10,10 +10,26 @@ WHEEL_DIAMETER_MM = 40  # Outer diameter of drive wheels WITH TRACKS
 TRACK_WIDTH_MM = 130.0  # Distance between wheel centers (for pivot turns)
 
 # =============================================================================
-# Motor Pin Configuration (BCM GPIO numbers)
+# Stepper Motor Pin Configuration (BCM GPIO numbers) - 28BYJ-48 + ULN2003
 # =============================================================================
-LEFT_MOTOR_PINS = [17, 27, 22, 23]  # IN1, IN2, IN3, IN4
-RIGHT_MOTOR_PINS = [5, 6, 13, 19]  # IN1, IN2, IN3, IN4
+LEFT_STEPPER_PINS = [17, 27, 22, 23]  # IN1, IN2, IN3, IN4
+RIGHT_STEPPER_PINS = [5, 6, 13, 19]  # IN1, IN2, IN3, IN4
+
+# =============================================================================
+# DC Motor Pin Configuration (BCM GPIO numbers) - N20 + TB6612FNG
+# =============================================================================
+# Right motor (TB6612FNG channel A)
+DC_RIGHT_PWM = 12
+DC_RIGHT_IN1 = 20
+DC_RIGHT_IN2 = 21
+
+# Left motor (TB6612FNG channel B) - IN1/IN2 swapped to fix direction
+DC_LEFT_PWM = 16
+DC_LEFT_IN1 = 25  # Swapped from 24
+DC_LEFT_IN2 = 24  # Swapped from 25
+
+# PWM frequency for DC motors (Hz)
+DC_PWM_FREQ = 1000
 
 # =============================================================================
 # Calibrated Movement Constants

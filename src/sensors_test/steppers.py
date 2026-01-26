@@ -5,7 +5,7 @@ import time
 
 import lgpio
 
-from robot.config import LEFT_MOTOR_PINS, RIGHT_MOTOR_PINS
+from robot.config import LEFT_STEPPER_PINS, RIGHT_STEPPER_PINS
 from robot.motors import Stepper
 
 
@@ -14,8 +14,8 @@ def main():
     chip = lgpio.gpiochip_open(4)
 
     try:
-        left = Stepper(chip, LEFT_MOTOR_PINS)
-        right = Stepper(chip, RIGHT_MOTOR_PINS)
+        left = Stepper(chip, LEFT_STEPPER_PINS)
+        right = Stepper(chip, RIGHT_STEPPER_PINS)
 
         print("Moving both motors forward...")
         for _ in range(
