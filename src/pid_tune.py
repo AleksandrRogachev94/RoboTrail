@@ -28,10 +28,10 @@ from sensors.encoder import Encoder, list_encoder_devices
 
 # Config
 TARGET_VELOCITY = 700  # ticks/sec
-COMPANION_PWM = 50  # Fixed PWM for the other motor
+COMPANION_PWM = 40  # Fixed PWM for the other motor
 DT = 0.02  # 50 Hz
 DURATION = 5.0  # seconds
-VELOCITY_SAMPLES = 3  # Moving average window for smoothing
+VELOCITY_SAMPLES = 1  # Moving average window for smoothing
 
 
 def main():
@@ -145,8 +145,8 @@ def main():
         plt.figure(figsize=(10, 4))
 
         # Skip first 0.5 seconds (startup transient)
-        plot_times = [t for t in times if t >= 0.5]
-        plot_vels = [v for t, v in zip(times, velocities) if t >= 0.5]
+        plot_times = [t for t in times if t >= 0]
+        plot_vels = [v for t, v in zip(times, velocities) if t >= 0]
 
         plt.plot(plot_times, plot_vels, "b-", label="Velocity")
         plt.axhline(y=TARGET_VELOCITY, color="r", linestyle="--", label="Target")
