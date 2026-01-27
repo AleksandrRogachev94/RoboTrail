@@ -48,6 +48,13 @@ STEPS_PER_DEGREE = 62.0  # TODO: Calibrate with actual measurement
 DEFAULT_STEP_DELAY = 0.001  # Seconds between steps (1ms = smooth movement)
 
 # =============================================================================
+# PID Control Constants (Tuned Ziegler-Nichols)
+# =============================================================================
+PID_KP = 0.15
+PID_KI = 0.1
+PID_KD = 0.0
+
+# =============================================================================
 # Servo/ToF Calibration
 # =============================================================================
 # Offset to correct servo 0° to true forward (run calibrate_servo_angle.py)
