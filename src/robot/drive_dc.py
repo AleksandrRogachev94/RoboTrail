@@ -19,7 +19,7 @@ from robot.dc_motor_pid import DCMotorPID
 from sensors.encoder import list_encoder_devices
 
 # Movement constants - CALIBRATE THESE!
-TICKS_PER_CM = 50.0  # TODO: Calibrate with real measurement
+TICKS_PER_CM = 62.5  # Calibrate with real measurement
 DEFAULT_VELOCITY = 700  # ticks/sec
 DT = 0.02  # 50HZ
 
@@ -51,7 +51,7 @@ class RobotDC:
             DC_LEFT_IN1,
             DC_LEFT_IN2,
             left_enc_path,
-            reversed=True,
+            encoder_reversed=True,
         )
         self.right = DCMotorPID(
             self.chip,
@@ -59,7 +59,7 @@ class RobotDC:
             DC_RIGHT_IN1,
             DC_RIGHT_IN2,
             right_enc_path,
-            reversed=False,
+            encoder_reversed=False,
         )
 
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
