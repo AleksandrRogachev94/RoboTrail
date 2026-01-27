@@ -2,7 +2,13 @@
 
 import time
 
-from robot.config import PID_KD, PID_KI, PID_KP
+from robot.config import (
+    FEEDFORWARD_OFFSET,
+    FEEDFORWARD_SLOPE,
+    PID_KD,
+    PID_KI,
+    PID_KP,
+)
 from robot.dc_motor import DCMotor
 from robot.pid import PID
 from sensors.encoder import Encoder
@@ -15,6 +21,7 @@ class DCMotorPID:
     - DCMotor: PWM control
     - Encoder: Position/velocity feedback
     - PID: Velocity controller
+    - Feedforward: Initial PWM estimate
     """
 
     def __init__(
@@ -46,7 +53,14 @@ class DCMotorPID:
         self._last_time = time.monotonic()
         self._velocity = 0.0
 
-    def update(self, target_velocity: float) -> float:
+    def _feedforward(self, target_velocity: float) -> float:
+        """Estimate PWM needed for target velocity."""
+        if target_velocity == 0:
+            return 0
+        sign = 1 if target_velocity > 0 else -1
+        return sign * (FEEDFORWARD_OFFSET + FEEDFORWARD_SLOPE * abs(target_velocity))
+
+    def update(self, target_velocity: float) -> tuple[float, float]:
         """
         Run one PID iteration. Call this at ~50Hz.
 
@@ -54,7 +68,7 @@ class DCMotorPID:
             target_velocity: Desired velocity in ticks/sec
 
         Returns:
-            Current measured velocity
+            Tuple of (current_velocity, pwm_output)
         """
         now = time.monotonic()
         dt = now - self._last_time
@@ -65,9 +79,11 @@ class DCMotorPID:
         # Calculate velocity = (pos - last_pos) / dt
         velocity = (pos - self._last_pos) / dt
 
-        # Calculate error and get PID output
+        # Feedforward + PID correction
+        feedforward = self._feedforward(target_velocity)
         error = target_velocity - velocity
-        output = self.pid.update(error, dt)
+        correction = self.pid.update(error, dt)
+        output = feedforward + correction
 
         # Apply output to motor
         self.motor.set_speed(output)
@@ -77,7 +93,7 @@ class DCMotorPID:
         self._last_time = now
         self._velocity = velocity
 
-        return velocity
+        return velocity, output
 
     @property
     def position(self) -> int:

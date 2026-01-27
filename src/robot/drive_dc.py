@@ -118,8 +118,8 @@ class RobotDC:
             diff = self.heading_pid.update(heading_error, dt_actual)
 
             # Apply with heading correction (motor PIDs use their own timing)
-            left_vel = self.left.update(vel - diff)
-            right_vel = self.right.update(vel + diff)
+            left_vel, left_pwm = self.left.update(vel - diff)
+            right_vel, right_pwm = self.right.update(vel + diff)
 
             # Log data
             self.history.append(
@@ -127,6 +127,8 @@ class RobotDC:
                     "t": t,
                     "left_vel": left_vel,
                     "right_vel": right_vel,
+                    "left_pwm": left_pwm,
+                    "right_pwm": right_pwm,
                     "heading": self._heading,
                     "heading_error": heading_error,
                     "heading_diff": diff,
@@ -173,9 +175,9 @@ class RobotDC:
             heading_error = target_heading - self._heading
             adjustment = self.heading_pid.update(heading_error, dt_actual)
 
-            # Differential drive for turning
-            left_vel = self.left.update(-adjustment)
-            right_vel = self.right.update(adjustment)
+            # Differential drive for turning (feedforward handles friction)
+            left_vel, left_pwm = self.left.update(-adjustment)
+            right_vel, right_pwm = self.right.update(adjustment)
 
             # Log data
             self.history.append(
@@ -183,6 +185,8 @@ class RobotDC:
                     "t": t,
                     "left_vel": left_vel,
                     "right_vel": right_vel,
+                    "left_pwm": left_pwm,
+                    "right_pwm": right_pwm,
                     "heading": self._heading,
                     "heading_error": heading_error,
                     "heading_diff": adjustment,

@@ -30,10 +30,13 @@ def plot_history(history: list, title: str, filename: str) -> None:
         times = [h["t"] for h in history]
         left_vel = [h["left_vel"] for h in history]
         right_vel = [h["right_vel"] for h in history]
+        left_pwm = [h["left_pwm"] for h in history]
+        right_pwm = [h["right_pwm"] for h in history]
         heading = [h["heading"] for h in history]
         heading_err = [h["heading_error"] for h in history]
+        heading_diff = [h["heading_diff"] for h in history]
 
-        fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
         # Velocities
         axes[0].plot(times, left_vel, "b-", label="Left Vel")
@@ -42,13 +45,21 @@ def plot_history(history: list, title: str, filename: str) -> None:
         axes[0].legend()
         axes[0].grid(True)
 
-        # Heading
-        axes[1].plot(times, heading, "g-", label="Heading")
-        axes[1].plot(times, heading_err, "m--", label="Heading Error")
-        axes[1].set_ylabel("Degrees")
-        axes[1].set_xlabel("Time (s)")
+        # PWM outputs
+        axes[1].plot(times, left_pwm, "b-", label="Left PWM")
+        axes[1].plot(times, right_pwm, "r-", label="Right PWM")
+        axes[1].plot(times, heading_diff, "g--", label="Heading Diff")
+        axes[1].set_ylabel("PWM % / Heading Adj")
         axes[1].legend()
         axes[1].grid(True)
+
+        # Heading
+        axes[2].plot(times, heading, "g-", label="Heading")
+        axes[2].plot(times, heading_err, "m--", label="Heading Error")
+        axes[2].set_ylabel("Degrees")
+        axes[2].set_xlabel("Time (s)")
+        axes[2].legend()
+        axes[2].grid(True)
 
         fig.suptitle(title)
         plt.tight_layout()
@@ -81,7 +92,7 @@ def main():
             actual = float(actual)
             correction = 30 / actual
             print(f"Correction factor: {correction:.3f}")
-            print(f"New TICKS_PER_CM = {50 * correction:.1f}")
+            print(f"New TICKS_PER_CM = {62.5 * correction:.1f}")
 
         # Test 2: Turn 90 degrees
         print("\n=== Test: Turn 90 degrees CCW ===")
