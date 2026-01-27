@@ -84,6 +84,7 @@ class DCMotorPID:
         error = target_velocity - velocity
         correction = self.pid.update(error, dt)
         output = feedforward + correction
+        output = max(-100, min(100, output))  # Clamp to valid PWM range
 
         # Apply output to motor
         self.motor.set_speed(output)
