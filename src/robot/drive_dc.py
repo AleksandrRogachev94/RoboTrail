@@ -3,8 +3,7 @@
 Provides intuitive commands like forward(cm) and turn(degrees).
 """
 
-import math
-from time import sleep
+from time import monotonic, sleep
 
 from robot.config import (
     DC_LEFT_IN1,
@@ -13,10 +12,14 @@ from robot.config import (
     DC_RIGHT_IN1,
     DC_RIGHT_IN2,
     DC_RIGHT_PWM,
-    TRACK_WIDTH_MM,
+    HEADING_PID_KD,
+    HEADING_PID_KI,
+    HEADING_PID_KP,
 )
 from robot.dc_motor_pid import DCMotorPID
+from robot.pid import PID
 from sensors.encoder import list_encoder_devices
+from sensors.imu import IMU
 
 # Movement constants - CALIBRATE THESE!
 TICKS_PER_CM = 62.5  # Calibrate with real measurement
@@ -62,9 +65,23 @@ class RobotDC:
             encoder_reversed=False,
         )
 
+        # IMU and heading control
+        self.imu = IMU()  # Calibrates gyro on init
+        self.heading_pid = PID(kp=HEADING_PID_KP, ki=HEADING_PID_KI, kd=HEADING_PID_KD)
+        self._heading = 0.0  # Current heading in degrees (integrated from gyro)
+        self._last_heading_time = 0.0
+
+        # Data logging for plots
+        self.history = []
+
+    def _update_heading(self, dt: float) -> None:
+        """Update heading by integrating gyro Z reading."""
+        gyro_z = self.imu.read_gyro_z()  # deg/s
+        self._heading += gyro_z * dt
+
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
-        Drive forward by specified distance.
+        Drive forward by specified distance with heading correction.
 
         Args:
             cm: Distance in centimeters (negative = backward)
@@ -73,40 +90,111 @@ class RobotDC:
         # Calculate target ticks from cm
         target_ticks = cm * TICKS_PER_CM
 
-        # Reset motors
+        # Reset motors and heading PID
         self.left.reset()
         self.right.reset()
+        self.heading_pid.reset()
+        target_heading = self._heading  # Maintain current heading
 
         # Determine velocity sign based on direction
         vel = velocity if cm >= 0 else -velocity
 
-        # TODO: Control loop - run until both motors reach target
+        # Control loop - run until both motors reach target
+        t = 0.0
+        last_time = monotonic()
         while abs(self.left.position) < abs(target_ticks) and abs(
             self.right.position
         ) < abs(target_ticks):
-            self.left.update(vel)
-            self.right.update(vel)
-            sleep(DT)
+            # Calculate actual dt
+            now = monotonic()
+            dt_actual = now - last_time
+            last_time = now
+
+            # Update heading from IMU (use actual dt)
+            self._update_heading(dt_actual)
+
+            # Heading correction (differential velocity)
+            heading_error = target_heading - self._heading
+            diff = self.heading_pid.update(heading_error, dt_actual)
+
+            # Apply with heading correction (motor PIDs use their own timing)
+            left_vel = self.left.update(vel - diff)
+            right_vel = self.right.update(vel + diff)
+
+            # Log data
+            self.history.append(
+                {
+                    "t": t,
+                    "left_vel": left_vel,
+                    "right_vel": right_vel,
+                    "heading": self._heading,
+                    "heading_error": heading_error,
+                    "heading_diff": diff,
+                }
+            )
+
+            t += dt_actual
+
+            # Sleep remainder of DT for consistent timing
+            elapsed = monotonic() - now
+            if elapsed < DT:
+                sleep(DT - elapsed)
 
         # Stop motors
         self.stop()
 
-    def turn(self, degrees: float, velocity: float = DEFAULT_VELOCITY):
-        """Simple differential turn (no IMU, uses encoders only)."""
-        # Rough estimate: track_width * pi * degrees / 360 = arc length per wheel
-        arc_per_wheel = (TRACK_WIDTH_MM / 10) * math.pi * abs(degrees) / 360
-        target_ticks = arc_per_wheel * TICKS_PER_CM
+    def turn(self, degrees: float, velocity: float = DEFAULT_VELOCITY) -> None:
+        """
+        Turn by specified degrees using IMU feedback.
 
+        Args:
+            degrees: Rotation angle (positive = counterclockwise)
+            velocity: Base speed in ticks/sec
+        """
         self.left.reset()
         self.right.reset()
+        self.heading_pid.reset()
 
-        left_vel = -velocity if degrees > 0 else velocity
-        right_vel = velocity if degrees > 0 else -velocity
+        target_heading = self._heading + degrees
 
-        while abs(self.left.position) < target_ticks:
-            self.left.update(left_vel)
-            self.right.update(right_vel)
-            sleep(DT)
+        # Turn until heading reached (within 1 degree)
+        t = 0.0
+        last_time = monotonic()
+        while abs(target_heading - self._heading) > 1.0:
+            # Calculate actual dt
+            now = monotonic()
+            dt_actual = now - last_time
+            last_time = now
+
+            # Update heading from IMU (use actual dt)
+            self._update_heading(dt_actual)
+
+            # Heading PID for smooth approach
+            heading_error = target_heading - self._heading
+            adjustment = self.heading_pid.update(heading_error, dt_actual)
+
+            # Differential drive for turning
+            left_vel = self.left.update(-adjustment)
+            right_vel = self.right.update(adjustment)
+
+            # Log data
+            self.history.append(
+                {
+                    "t": t,
+                    "left_vel": left_vel,
+                    "right_vel": right_vel,
+                    "heading": self._heading,
+                    "heading_error": heading_error,
+                    "heading_diff": adjustment,
+                }
+            )
+
+            t += dt_actual
+
+            # Sleep remainder of DT for consistent timing
+            elapsed = monotonic() - now
+            if elapsed < DT:
+                sleep(DT - elapsed)
 
         self.stop()
 

@@ -7,9 +7,6 @@ from robot.dc_motor import DCMotor
 from robot.pid import PID
 from sensors.encoder import Encoder
 
-# Control loop frequency
-DT = 0.02  # 50 Hz
-
 
 class DCMotorPID:
     """Single DC motor with closed-loop velocity control.
