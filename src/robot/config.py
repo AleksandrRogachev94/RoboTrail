@@ -56,9 +56,9 @@ PID_KI = 0.1
 PID_KD = 0.0
 
 # Feedforward: PWM = OFFSET + SLOPE * velocity
-# Measure by finding PWM at dead zone (~40%) and max velocity (~1400 ticks/sec at 100%)
-FEEDFORWARD_OFFSET = 40.0  # Dead zone PWM %
-FEEDFORWARD_SLOPE = 0.043  # (100-40) / 1400 ≈ 0.043
+# Calibrated via calibrate_feedforward.py
+FEEDFORWARD_OFFSET = 38.0  # Dead zone PWM %
+FEEDFORWARD_SLOPE = 0.067  # Measured from 50%→90% PWM tests
 
 # Heading PID (robot level) - TODO: Tune for your robot
 HEADING_PID_KP = 5.0  # degrees error → velocity differential
