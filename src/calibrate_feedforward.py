@@ -25,7 +25,7 @@ from robot.config import (
 from robot.dc_motor import DCMotor
 from sensors.encoder import Encoder, list_encoder_devices
 
-MEASURE_TIME = 0.5  # seconds per measurement (short to avoid runaway)
+MEASURE_TIME = 1  # seconds per measurement (short to avoid runaway)
 
 
 def measure_velocity(
@@ -35,7 +35,8 @@ def measure_velocity(
     left_enc.reset()
     right_enc.reset()
 
-    left.set_speed(pwm)
+    # Left motor needs negative speed due to swapped pins in config
+    left.set_speed(-pwm)
     right.set_speed(pwm)
     time.sleep(MEASURE_TIME)
     left.stop()
@@ -56,7 +57,8 @@ def find_dead_zone(
         left_enc.reset()
         right_enc.reset()
 
-        left.set_speed(pwm)
+        # Left motor needs negative speed due to swapped pins
+        left.set_speed(-pwm)
         right.set_speed(pwm)
         time.sleep(0.3)
         left.stop()
