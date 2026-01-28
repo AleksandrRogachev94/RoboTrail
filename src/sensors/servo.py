@@ -33,15 +33,13 @@ class HWServo:
 
     def set_angle(self, angle):
         """Set servo angle from -90 (left) to +90 (right), 0 = forward."""
-        # Clamp to valid range
-        angle = max(-90, min(90, angle))
-
         # Apply reversal if configured (for flipped servo mounting)
         if self.reversed:
             angle = -angle
 
-        # Apply calibration offset
+        # Apply calibration offset and clamp to physical servo limits
         angle += self.angle_offset
+        angle = max(-90, min(90, angle))
 
         # Convert angle (-90 to +90) to pulse width in nanoseconds
         # -90° → 500,000 ns  (0.5ms) - full left

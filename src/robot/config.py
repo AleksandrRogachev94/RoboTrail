@@ -69,4 +69,4 @@ HEADING_PID_KD = 0.0
 # Servo/ToF Calibration
 # =============================================================================
 # Offset to correct servo 0° to true forward (run calibrate_servo_angle.py)
-SERVO_ANGLE_OFFSET = 0.0  # degrees
+SERVO_ANGLE_OFFSET = 6.83  # degrees (calibrated via calibrate_servo_angle.py)
