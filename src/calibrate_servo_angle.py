@@ -14,7 +14,7 @@ import numpy as np
 from sensors.servo import HWServo
 
 
-def calibrate(sweep_range=5, step=0.5, num_sweeps=3):
+def calibrate(sweep_range=15, step=0.5, num_sweeps=3):
     """Sweep servo and find true 0° using parabolic fit."""
     i2c = board.I2C()
     tof = adafruit_vl53l1x.VL53L1X(i2c)

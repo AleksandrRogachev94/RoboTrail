@@ -61,7 +61,7 @@ FEEDFORWARD_OFFSET = 38.0  # Dead zone PWM %
 FEEDFORWARD_SLOPE = 0.067  # Measured from 50%→90% PWM tests
 
 # Heading PID (robot level) - TODO: Tune for your robot
-HEADING_PID_KP = 5.0  # degrees error → velocity differential
+HEADING_PID_KP = 30.0  # degrees error → velocity differential
 HEADING_PID_KI = 0.5
 HEADING_PID_KD = 0.0
 
