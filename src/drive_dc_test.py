@@ -36,7 +36,7 @@ def plot_history(history: list, title: str, filename: str) -> None:
         heading_err = [h["heading_error"] for h in history]
         heading_diff = [h["heading_diff"] for h in history]
 
-        fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+        fig, axes = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
 
         # Velocities
         axes[0].plot(times, left_vel, "b-", label="Left Vel")
@@ -48,8 +48,7 @@ def plot_history(history: list, title: str, filename: str) -> None:
         # PWM outputs
         axes[1].plot(times, left_pwm, "b-", label="Left PWM")
         axes[1].plot(times, right_pwm, "r-", label="Right PWM")
-        axes[1].plot(times, heading_diff, "g--", label="Heading Diff")
-        axes[1].set_ylabel("PWM % / Heading Adj")
+        axes[1].set_ylabel("PWM %")
         axes[1].legend()
         axes[1].grid(True)
 
@@ -57,9 +56,15 @@ def plot_history(history: list, title: str, filename: str) -> None:
         axes[2].plot(times, heading, "g-", label="Heading")
         axes[2].plot(times, heading_err, "m--", label="Heading Error")
         axes[2].set_ylabel("Degrees")
-        axes[2].set_xlabel("Time (s)")
         axes[2].legend()
         axes[2].grid(True)
+
+        # Heading PID output (velocity correction)
+        axes[3].plot(times, heading_diff, "c-", label="Heading PID Output")
+        axes[3].set_ylabel("Vel Adj (ticks/s)")
+        axes[3].set_xlabel("Time (s)")
+        axes[3].legend()
+        axes[3].grid(True)
 
         fig.suptitle(title)
         plt.tight_layout()
