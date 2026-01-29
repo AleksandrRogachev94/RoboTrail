@@ -76,8 +76,9 @@ class Scanner:
                 continue
             # Convert to Cartesian (Robot Frame: X=Forward, Y=Left)
             # Angle 0 is Forward (+X)
+            # Note: Y is inverted because physical servo moves Right for +Angle commands
             x = distance * math.cos(angle_rad)
-            y = distance * math.sin(angle_rad)
+            y = -distance * math.sin(angle_rad)
             cartesian.append([x, y])
 
         return np.array(cartesian)
