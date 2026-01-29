@@ -3,6 +3,7 @@
 Provides intuitive commands like forward(cm) and turn(degrees).
 """
 
+import math
 from time import monotonic, sleep
 
 from robot.config import (
@@ -68,16 +69,42 @@ class RobotDC:
         # IMU and heading control
         self.imu = IMU()  # Calibrates gyro on init
         self.heading_pid = PID(kp=HEADING_PID_KP, ki=HEADING_PID_KI, kd=HEADING_PID_KD)
-        self._heading = 0.0  # Current heading in degrees (integrated from gyro)
-        self._last_heading_time = 0.0
+        self.reset_pose()
 
         # Data logging for plots
         self.history = []
 
-    def _update_heading(self, dt: float) -> None:
-        """Update heading by integrating gyro Z reading."""
+    def _update_heading(self, dt: float) -> float:
+        """Update heading from IMU gyro.
+
+        Returns:
+            Angular velocity in rad/s (for position update).
+        """
         gyro_z = self.imu.read_gyro_z()  # deg/s
         self._heading += gyro_z * dt
+        return math.radians(gyro_z)  # rad/s
+
+    def _update_position(
+        self, left_vel: float, right_vel: float, omega: float, dt: float
+    ) -> None:
+        """Update x, y position using RK2 integration.
+
+        Args:
+            left_vel: Left wheel velocity in ticks/sec
+            right_vel: Right wheel velocity in ticks/sec
+            omega: Angular velocity in rad/s (from _update_heading)
+            dt: Time step in seconds
+        """
+        # Linear velocity from encoders
+        v = (left_vel + right_vel) / 2 / TICKS_PER_CM  # cm/s
+
+        # RK2: use midpoint heading for curved path
+        theta = math.radians(self._heading)
+        theta_mid = theta - (omega * dt) / 2  # Go back to midpoint
+
+        # Update position
+        self.x += v * math.cos(theta_mid) * dt
+        self.y += v * math.sin(theta_mid) * dt
 
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
@@ -94,6 +121,7 @@ class RobotDC:
         self.left.reset()
         self.right.reset()
         self.heading_pid.reset()
+        self.reset_pose()
         target_heading = self._heading  # Maintain current heading
 
         # Determine velocity sign based on direction
@@ -111,7 +139,7 @@ class RobotDC:
             last_time = now
 
             # Update heading from IMU (use actual dt)
-            self._update_heading(dt_actual)
+            omega = self._update_heading(dt_actual)
 
             # Heading correction (differential velocity)
             heading_error = target_heading - self._heading
@@ -120,6 +148,9 @@ class RobotDC:
             # Apply with heading correction (motor PIDs use their own timing)
             left_vel, left_pwm = self.left.update(vel - diff)
             right_vel, right_pwm = self.right.update(vel + diff)
+
+            # Update position with current velocities
+            self._update_position(left_vel, right_vel, omega, dt_actual)
 
             # Log data
             self.history.append(
@@ -156,6 +187,7 @@ class RobotDC:
         self.left.reset()
         self.right.reset()
         self.heading_pid.reset()
+        self.reset_pose()
 
         target_heading = self._heading + degrees
 
@@ -169,7 +201,7 @@ class RobotDC:
             last_time = now
 
             # Update heading from IMU (use actual dt)
-            self._update_heading(dt_actual)
+            omega = self._update_heading(dt_actual)
 
             # Heading PID for smooth approach
             heading_error = target_heading - self._heading
@@ -178,6 +210,9 @@ class RobotDC:
             # Differential drive for turning (feedforward handles friction)
             left_vel, left_pwm = self.left.update(-adjustment)
             right_vel, right_pwm = self.right.update(adjustment)
+
+            # Update position with current velocities
+            self._update_position(left_vel, right_vel, omega, dt_actual)
 
             # Log data
             self.history.append(
@@ -201,6 +236,16 @@ class RobotDC:
                 sleep(DT - elapsed)
 
         self.stop()
+
+    def get_pose(self) -> tuple[float, float, float]:
+        """Return current pose (x, y, heading) in cm/degrees."""
+        return (self.x, self.y, self._heading)
+
+    def reset_pose(self) -> None:
+        """Reset pose to origin."""
+        self._heading = 0.0  # Current heading in degrees
+        self.x = 0.0  # Current x position in cm
+        self.y = 0.0  # Current y position in cm
 
     def stop(self) -> None:
         """Stop both motors."""
