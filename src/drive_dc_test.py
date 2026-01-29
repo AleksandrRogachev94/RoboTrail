@@ -84,7 +84,11 @@ def main():
         robot.history.clear()
         robot.forward(30)
 
-        print("Done! Measure actual distance traveled.")
+        x, y, heading = robot.get_pose()
+        print(
+            f"Done! Calculated pose: x={x:.1f}cm, y={y:.1f}cm, heading={heading:.1f}°"
+        )
+        print("Measure actual distance traveled.")
         plot_history(robot.history, "Forward 30cm", "forward_30cm.png")
 
         actual = input("Enter actual distance in cm (or press Enter to skip): ")
@@ -101,8 +105,26 @@ def main():
         robot.history.clear()
         robot.turn(90)
 
-        print("Done! Check if it turned ~90 degrees.")
+        x, y, heading = robot.get_pose()
+        print(
+            f"Done! Calculated pose: x={x:.1f}cm, y={y:.1f}cm, heading={heading:.1f}°"
+        )
         plot_history(robot.history, "Turn 90 degrees", "turn_90deg.png")
+
+        # Test 3: Arc motion (quarter circle)
+        print("\n=== Test: Arc - Quarter circle left, 30cm radius ===")
+        print("Robot should curve left ~90 degrees over ~47cm arc length")
+        input("Press Enter to start arc...")
+
+        robot.history.clear()
+        robot.arc(radius_cm=30, arc_length_cm=47)  # π*30/2 ≈ 47cm for quarter circle
+
+        x, y, heading = robot.get_pose()
+        print(
+            f"Done! Calculated pose: x={x:.1f}cm, y={y:.1f}cm, heading={heading:.1f}°"
+        )
+        print("Expected for quarter circle left: x≈30cm, y≈30cm, heading≈90°")
+        plot_history(robot.history, "Arc: 30cm radius, quarter circle", "arc_30cm.png")
 
     except KeyboardInterrupt:
         print("\nInterrupted")

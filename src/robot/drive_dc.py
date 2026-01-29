@@ -16,6 +16,7 @@ from robot.config import (
     HEADING_PID_KD,
     HEADING_PID_KI,
     HEADING_PID_KP,
+    TRACK_WIDTH_CM,
 )
 from robot.dc_motor_pid import DCMotorPID
 from robot.pid import PID
@@ -174,6 +175,101 @@ class RobotDC:
                 sleep(DT - elapsed)
 
         # Stop motors
+        self.stop()
+
+    def arc(
+        self,
+        radius_cm: float,
+        arc_length_cm: float,
+        velocity: float = DEFAULT_VELOCITY,
+    ) -> None:
+        """
+        Drive in a circular arc.
+
+        Args:
+            radius_cm: Turning radius from robot center.
+                       Positive = turn left (CCW), Negative = turn right (CW).
+            arc_length_cm: Distance to travel along the arc (positive = forward).
+            velocity: Target linear velocity at robot center (ticks/sec).
+        """
+        # Reset motors and heading PID
+        self.left.reset()
+        self.right.reset()
+        self.heading_pid.reset()
+        self.reset_pose()
+
+        # Angular velocity around arc center (rad/s in cm units)
+        omega = velocity / TICKS_PER_CM / abs(radius_cm)
+
+        # Compute wheel velocities based on turn direction
+        if radius_cm > 0:  # Left turn: left wheel is inner
+            left_vel = omega * (radius_cm - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            right_vel = omega * (radius_cm + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            turn_sign = 1  # Heading increases (CCW)
+        else:  # Right turn: right wheel is inner
+            left_vel = omega * (abs(radius_cm) + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            right_vel = omega * (abs(radius_cm) - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            turn_sign = -1  # Heading decreases (CW)
+
+        # Target arc in ticks (use average of both wheels' paths)
+        target_ticks = arc_length_cm * TICKS_PER_CM
+        start_heading = self._heading
+
+        # Control loop
+        t = 0.0
+        last_time = monotonic()
+        while True:
+            # Check progress using average of both encoders
+            avg_ticks = (abs(self.left.position) + abs(self.right.position)) / 2
+            if avg_ticks >= target_ticks:
+                break
+
+            # Calculate actual dt
+            now = monotonic()
+            dt_actual = now - last_time
+            last_time = now
+
+            # Update heading from IMU
+            omega_actual = self._update_heading(dt_actual)
+
+            # Expected heading based on arc progress
+            progress_angle = avg_ticks / TICKS_PER_CM / abs(radius_cm)  # radians
+            expected_heading = start_heading + math.degrees(progress_angle) * turn_sign
+
+            # Heading correction (PID tracks expected curved path)
+            heading_error = expected_heading - self._heading
+            diff = self.heading_pid.update(heading_error, dt_actual)
+
+            # Apply velocities with heading correction
+            actual_left_vel, left_pwm = self.left.update(left_vel - diff)
+            actual_right_vel, right_pwm = self.right.update(right_vel + diff)
+
+            # Update position
+            self._update_position(
+                actual_left_vel, actual_right_vel, omega_actual, dt_actual
+            )
+
+            # Log data
+            self.history.append(
+                {
+                    "t": t,
+                    "left_vel": actual_left_vel,
+                    "right_vel": actual_right_vel,
+                    "left_pwm": left_pwm,
+                    "right_pwm": right_pwm,
+                    "heading": self._heading,
+                    "expected_heading": expected_heading,
+                    "heading_error": heading_error,
+                }
+            )
+
+            t += dt_actual
+
+            # Sleep remainder of DT
+            elapsed = monotonic() - now
+            if elapsed < DT:
+                sleep(DT - elapsed)
+
         self.stop()
 
     def turn(self, degrees: float, velocity: float = DEFAULT_VELOCITY) -> None:

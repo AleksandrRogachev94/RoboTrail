@@ -151,6 +151,35 @@ def slam_loop():
 
 **Why it matters for SLAM:** Accurate odometry = better pose prediction = better scan matching = better maps.
 
+#### Arc Movement for Path Following
+
+The robot cannot reliably rotate in place (friction causes stuttering), so we use **arc motion** where both wheels move forward at different speeds.
+
+**Path pipeline:**
+
+1. **A\*** on occupancy grid → raw path
+2. **Gradient descent smoothing** (Sebastian Thrun's method) → smooth waypoints
+3. **Arc-to-waypoint** geometry → compute arc from current pose to next waypoint
+4. **Execute arc()** → differential wheel velocities
+
+**Key formula** - Arc to reach point (x', y') from pose (x, y, θ):
+
+```python
+# Transform target to robot frame
+local_x = dx * cos(θ) + dy * sin(θ)  # forward
+local_y = -dx * sin(θ) + dy * cos(θ)  # left
+
+# Arc radius (positive = left turn)
+radius = (local_x² + local_y²) / (2 * local_y)
+```
+
+**Wheel velocities for arc:**
+
+```python
+v_left  = v_center * (1 - 1/radius * track_width/2)
+v_right = v_center * (1 + 1/radius * track_width/2)
+```
+
 ---
 
 ### Stage 4: Occupancy Grid (This is SLAM!)
