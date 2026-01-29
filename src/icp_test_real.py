@@ -3,34 +3,50 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from icp import icp
-from robot.drive import Robot
+from robot.drive_dc import RobotDC
 from scanner import Scanner
 
 if __name__ == "__main__":
     chip = lgpio.gpiochip_open(4)
-    robot = Robot(chip)
+    # Use DC robot
+    robot = RobotDC(chip)
     scanner = Scanner()
-    move_cm = 30
-    rotate_deg = -20
+
     # Step 1: Reference scan
     print("Taking reference scan (Scan A)...")
     scan_a = scanner.scan()
     print(f"  Scan A: {len(scan_a)} points")
-    # Step 2: Move robot
-    print(f"Moving forward {move_cm} cm...")
-    robot.forward(move_cm)
-    print(f"Rotating {rotate_deg} degrees...")
-    robot.turn(rotate_deg)
+
+    # Step 2: Move robot (using arc for more realistic test)
+    # We want to move ~30cm and rotate ~20 degrees
+    # Arc of 85cm radius and 30cm length gives ~20 degree turn
+    radius_cm = 85
+    arc_length_cm = 30
+
+    print(f"Driving arc: radius={radius_cm}cm, length={arc_length_cm}cm...")
+    robot.arc(radius_cm, arc_length_cm)
+
+    # Get actual calculated pose from odometry
+    odom_x, odom_y, odom_heading = robot.get_pose()
+    print(
+        f"Odometry pose: x={odom_x:.1f}cm, y={odom_y:.1f}cm, heading={odom_heading:.1f}°"
+    )
+
     # Step 3: Second scan
     print("Taking second scan (Scan B)...")
     scan_b = scanner.scan()
     print(f"  Scan B: {len(scan_b)} points")
-    # Step 4: Apply odometry transform (translation AND rotation)
-    theta = np.radians(-rotate_deg)  # Negative of robot rotation
-    R_odom = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-    # First rotate, then translate
-    scan_b_transformed = (R_odom @ scan_b.T).T + [0, move_cm]
-    print(f"Odometry estimate: translate ({0}, {move_cm}) cm, rotate {rotate_deg}°")
+
+    # Step 4: Apply odometry transform
+    # Convert odometry pose to transformation matrix
+    # Note: Scanning happens in robot frame, so we transform Scan B by the robot's movement
+    theta = np.radians(odom_heading)
+    c, s = np.cos(theta), np.sin(theta)
+    R_odom = np.array([[c, -s], [s, c]])
+
+    # Scan B points are in new robot frame. Transform them to world frame (Scan A frame)
+    # P_world = R * P_robot + T
+    scan_b_transformed = (R_odom @ scan_b.T).T + [odom_x, odom_y]
     # Step 5: Run ICP
     print("Running ICP...")
     R, t, aligned, converged = icp(scan_b_transformed, scan_a, max_distance=20)
@@ -76,7 +92,7 @@ if __name__ == "__main__":
     plt.ylabel("Y (cm)")
     plt.legend()
     plt.title(
-        f"ICP Test: moved {move_cm}cm, rotated {rotate_deg}°, correction=({t[0]:.1f}, {t[1]:.1f})cm, {angle_deg:.1f}°"
+        f"ICP Test: moved ({odom_x:.1f}, {odom_y:.1f})cm, {odom_heading:.1f}°, correction=({t[0]:.1f}, {t[1]:.1f})cm, {angle_deg:.1f}°"
     )
     # plt.axis("equal")
     plt.grid(True, alpha=0.3)
