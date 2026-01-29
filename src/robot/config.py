@@ -7,7 +7,7 @@ Update STEPS_PER_CM and STEPS_PER_DEGREE after running calibration.
 # Physical Dimensions (measure your robot)
 # =============================================================================
 WHEEL_DIAMETER_CM = 4  # Outer diameter of drive wheels WITH TRACKS
-TRACK_WIDTH_CM = 14.5  # Distance between wheel centers (for pivot turns)
+TRACK_WIDTH_CM = 17  # Distance between wheel centers (for pivot turns). Real value is about 14.5, increasing it to compensate for persistent slip
 
 # =============================================================================
 # Stepper Motor Pin Configuration (BCM GPIO numbers) - 28BYJ-48 + ULN2003
