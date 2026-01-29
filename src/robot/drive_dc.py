@@ -13,20 +13,18 @@ from robot.config import (
     DC_RIGHT_IN1,
     DC_RIGHT_IN2,
     DC_RIGHT_PWM,
+    DEFAULT_VELOCITY,
+    DT,
     HEADING_PID_KD,
     HEADING_PID_KI,
     HEADING_PID_KP,
+    TICKS_PER_CM,
     TRACK_WIDTH_CM,
 )
 from robot.dc_motor_pid import DCMotorPID
 from robot.pid import PID
 from sensors.encoder import list_encoder_devices
 from sensors.imu import IMU
-
-# Movement constants - CALIBRATE THESE!
-TICKS_PER_CM = 62.5  # Calibrate with real measurement
-DEFAULT_VELOCITY = 700  # ticks/sec
-DT = 0.02  # 50HZ
 
 
 class RobotDC:
@@ -107,6 +105,19 @@ class RobotDC:
         self.x += v * math.cos(theta_mid) * dt
         self.y += v * math.sin(theta_mid) * dt
 
+    def _max_arc_velocity(self, radius_cm: float) -> float:
+        """Compute max center velocity to prevent outer wheel saturation.
+
+        Args:
+            radius_cm: Turning radius (positive or negative).
+
+        Returns:
+            Max safe velocity in ticks/sec.
+        """
+        # Outer wheel travels (R + W/2) / R times the center distance
+        outer_factor = (abs(radius_cm) + TRACK_WIDTH_CM / 2) / abs(radius_cm)
+        return DEFAULT_VELOCITY / outer_factor
+
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
         Drive forward by specified distance with heading correction.
@@ -181,7 +192,7 @@ class RobotDC:
         self,
         radius_cm: float,
         arc_length_cm: float,
-        velocity: float = DEFAULT_VELOCITY,
+        velocity: float | None = None,
     ) -> None:
         """
         Drive in a circular arc.
@@ -191,7 +202,18 @@ class RobotDC:
                        Positive = turn left (CCW), Negative = turn right (CW).
             arc_length_cm: Distance to travel along the arc (positive = forward).
             velocity: Target linear velocity at robot center (ticks/sec).
+                      If None, auto-computes max safe velocity for the radius.
         """
+        # Auto-compute or clamp velocity to prevent outer wheel saturation
+        max_vel = self._max_arc_velocity(radius_cm)
+        if velocity is None:
+            velocity = max_vel
+        else:
+            velocity = min(velocity, max_vel)
+        print(
+            f"Arc: radius={radius_cm}cm, velocity={velocity:.0f} ticks/s (max={max_vel:.0f})"
+        )
+
         # Reset motors and heading PID
         self.left.reset()
         self.right.reset()
