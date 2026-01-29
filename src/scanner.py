@@ -74,8 +74,10 @@ class Scanner:
             distance = distances[i]
             if distance is None:
                 continue
-            x = distance * math.sin(angle_rad)
-            y = distance * math.cos(angle_rad)
+            # Convert to Cartesian (Robot Frame: X=Forward, Y=Left)
+            # Angle 0 is Forward (+X)
+            x = distance * math.cos(angle_rad)
+            y = distance * math.sin(angle_rad)
             cartesian.append([x, y])
 
         return np.array(cartesian)

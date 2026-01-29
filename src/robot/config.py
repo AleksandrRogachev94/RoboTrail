@@ -77,3 +77,5 @@ HEADING_PID_KD = 0.0
 # =============================================================================
 # Offset to correct servo 0° to true forward (run calibrate_servo_angle.py)
 SERVO_ANGLE_OFFSET = 6.83  # degrees (calibrated via calibrate_servo_angle.py)
+TOF_OFFSET_X = 7.0  # cm (forward from wheel axis)
+TOF_OFFSET_Y = 0.0  # cm (lateral center)
