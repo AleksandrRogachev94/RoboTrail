@@ -260,6 +260,7 @@ class RobotDC:
                     "heading": self._heading,
                     "expected_heading": expected_heading,
                     "heading_error": heading_error,
+                    "heading_diff": diff,
                 }
             )
 
