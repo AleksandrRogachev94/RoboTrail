@@ -79,3 +79,16 @@ HEADING_PID_KD = 0.0
 SERVO_ANGLE_OFFSET = 6.83  # degrees (calibrated via calibrate_servo_angle.py)
 TOF_OFFSET_X = 7.0  # cm (forward from wheel axis)
 TOF_OFFSET_Y = 0.0  # cm (lateral center)
+
+# =============================================================================
+# Occupancy Grid
+# =============================================================================
+GRID_RESOLUTION = 2.0  # cm per cell
+GRID_SIZE = 500  # cells per side (500 × 500 = 10m × 10m at 2cm resolution)
+GRID_ORIGIN = 250  # Robot starts at cell (250, 250) = center of grid
+
+# Log-odds update parameters
+L_OCC = 0.85  # Added when ray HITS a cell (occupied evidence)
+L_FREE = 0.4  # Subtracted when ray PASSES THROUGH a cell (free evidence)
+L_MAX = 5.0  # Clamp max (prevents over-confidence)
+L_MIN = -5.0  # Clamp min

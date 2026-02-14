@@ -200,7 +200,6 @@ class RobotDC:
         self.left.reset()
         self.right.reset()
         self.heading_pid.reset()
-        self.reset_pose()
         target_heading = self._heading  # Maintain current heading
 
         # Determine velocity sign based on direction
@@ -285,7 +284,6 @@ class RobotDC:
         self.left.reset()
         self.right.reset()
         self.heading_pid.reset()
-        self.reset_pose()
 
         # Angular velocity around arc center (rad/s in cm units)
         omega = velocity / TICKS_PER_CM / abs(radius_cm)
@@ -373,7 +371,6 @@ class RobotDC:
         self.left.reset()
         self.right.reset()
         self.heading_pid.reset()
-        self.reset_pose()
 
         target_heading = self._heading + degrees
 
