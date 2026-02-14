@@ -118,6 +118,73 @@ class RobotDC:
         outer_factor = (abs(radius_cm) + TRACK_WIDTH_CM / 2) / abs(radius_cm)
         return DEFAULT_VELOCITY / outer_factor
 
+    def arc_to_point(
+        self, target_x: float, target_y: float
+    ) -> tuple[float, float] | tuple[None, float]:
+        """Compute arc parameters to reach a target point from current pose.
+
+        Finds the unique circular arc that:
+        1. Starts at current position (self.x, self.y)
+        2. Has initial direction matching current heading (self._heading)
+        3. Passes through (target_x, target_y)
+
+        Args:
+            target_x: Target X position in cm (world frame).
+            target_y: Target Y position in cm (world frame).
+
+        Returns:
+            (radius_cm, arc_length_cm) for use with arc(), or
+            (None, distance_cm) if target is straight ahead (use forward()).
+        """
+        # Vector to target in world frame
+        dx = target_x - self.x
+        dy = target_y - self.y
+
+        # Transform to robot frame (ROS: x=forward, y=left, heading=0 → +x)
+        theta = math.radians(self._heading)
+        # local_x = forward, local_y = left
+        local_x = dx * math.cos(theta) + dy * math.sin(theta)
+        local_y = -dx * math.sin(theta) + dy * math.cos(theta)
+
+        # Distance to target
+        L = math.hypot(local_x, local_y)
+
+        # If target is nearly straight ahead, use forward()
+        if abs(local_y) < 0.5:  # Less than 5mm lateral offset
+            return (None, local_x)  # None signals "use forward()"
+
+        # Arc geometry: R = L² / (2 * local_y)
+        # Positive local_y = target is to the left = positive radius (left turn)
+        radius = (L**2) / (2 * local_y)
+
+        # Arc angle (radians) - how much we turn
+        arc_angle = 2 * math.atan2(local_y, local_x)
+
+        # Arc length
+        arc_length = abs(radius * arc_angle)
+
+        return (radius, arc_length)
+
+    def move_to(self, target_x: float, target_y: float) -> None:
+        """Move to a target point using arc or straight-line motion.
+
+        Computes the appropriate arc (or straight line) from current pose
+        to target and executes it.
+
+        Args:
+            target_x: Target X position in cm (world frame).
+            target_y: Target Y position in cm (world frame).
+        """
+        result = self.arc_to_point(target_x, target_y)
+
+        if result[0] is None:
+            # Target is straight ahead
+            self.forward(result[1])
+        else:
+            # Use arc motion
+            radius, arc_length = result
+            self.arc(radius, arc_length)
+
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
         Drive forward by specified distance with heading correction.
