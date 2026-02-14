@@ -305,3 +305,4 @@ class OccupancyGrid:
             print(f"Saved to {save_path}")
         else:
             plt.show()
+        plt.close(fig)

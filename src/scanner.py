@@ -14,7 +14,7 @@ from sensors.servo import HWServo
 class Scanner:
     def __init__(
         self,
-        num_points=20,
+        num_points=40,
         timing_budget=100,
         settle_delay=0.01,
         distance_mode=2,
@@ -33,7 +33,7 @@ class Scanner:
             channel=2, reversed=servo_reversed, angle_offset=SERVO_ANGLE_OFFSET
         )
 
-    def scan(self, from_angle=-60, to_angle=60):
+    def scan(self, from_angle=-90, to_angle=90):
         """
         Scan from from_angle to to_angle.
 
