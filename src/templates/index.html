@@ -147,25 +147,27 @@ canvas.onclick = (e) => {
 };
 
 // ── Colormap ─────────────────────────────────────────────────────
+// 3-stop linear: free=dark blue-gray, unknown=very dark, occupied=bright cyan
 
 function probToColor(p) {
-  // Dark everywhere. Only walls pop.
-  const bg = [14, 16, 28]; // base dark
-
-  if (p < 0.4) {
-    // Free space: very slightly lighter than background
-    return [18, 22, 38];
-  } else if (p < 0.6) {
-    // Unknown: dark base
-    return bg;
-  } else {
-    // Occupied (0.6→1.0): ramp to bright cyan-green
-    const t = (p - 0.6) / 0.4; // 0→1
-    const t3 = t * t * t; // cubic ease-in: only very high p glows
+  if (p < 0.5) {
+    // Free (0) → Unknown (0.5)
+    // p=0: explored free space, show as visible dark blue-gray
+    // p=0.5: unknown/unseen, show as dark background
+    const t = p / 0.5;
     return [
-      lerp(14, 80, t3),    // R: stays dark
-      lerp(16, 255, t3),   // G: bright green
-      lerp(28, 220, t3),   // B: cyan tint
+      lerp(35, 14, t),
+      lerp(50, 16, t),
+      lerp(70, 28, t),
+    ];
+  } else {
+    // Unknown (0.5) → Occupied (1.0)
+    // Linear ramp to bright cyan-green
+    const t = (p - 0.5) / 0.5;
+    return [
+      lerp(14, 0, t),
+      lerp(16, 230, t),
+      lerp(28, 180, t),
     ];
   }
 }
