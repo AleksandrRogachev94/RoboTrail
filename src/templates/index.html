@@ -110,10 +110,13 @@ function poll() {
     if (d.icp) {
       if (d.icp.status === 'converged') {
         icpEl.style.color = '#4ecca3';
-        icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}°`;
+        icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}° (${d.icp.map_pts} map pts)`;
       } else if (d.icp.status === 'failed') {
         icpEl.style.color = '#fc5c65';
-        icpEl.textContent = '✗ failed to converge';
+        icpEl.textContent = `✗ failed (${d.icp.map_pts} map pts)`;
+      } else if (d.icp.status === 'building_map') {
+        icpEl.style.color = '#f7b731';
+        icpEl.textContent = 'building initial map...';
       } else {
         icpEl.style.color = '#666';
         icpEl.textContent = d.icp.status;

@@ -202,6 +202,24 @@ class OccupancyGrid:
         """
         return self.get_probability(row, col) > threshold
 
+    def get_occupied_points(self, threshold: float = 0.6) -> np.ndarray:
+        """Return world coordinates of all occupied cells.
+
+        Args:
+            threshold: Probability above which a cell is "occupied".
+
+        Returns:
+            (N, 2) array of [world_x, world_y] for each occupied cell.
+        """
+        prob_map = self.get_probability_map()
+        rows, cols = np.where(prob_map > threshold)
+        if len(rows) == 0:
+            return np.empty((0, 2))
+        # Convert grid indices to world coords (vectorized)
+        world_x = (cols - GRID_ORIGIN) * GRID_RESOLUTION
+        world_y = (rows - GRID_ORIGIN) * GRID_RESOLUTION
+        return np.column_stack([world_x, world_y])
+
     def is_free(self, row: int, col: int, threshold: float = 0.3) -> bool:
         """Check if a cell is considered free.
 

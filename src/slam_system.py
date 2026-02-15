@@ -39,7 +39,6 @@ class SlamSystem:
         self.robot = None
         self.scanner = None
         self.grid = OccupancyGrid()
-        self.prev_scan_world = None
 
         self._running = False
         self._thread = None
@@ -159,43 +158,46 @@ class SlamSystem:
             scan = self.scanner.scan()
             pose = self.robot.get_pose()
 
-            # ICP correction
-            if self.use_icp and self.prev_scan_world is not None and len(scan) > 5:
-                scan_world = self._scan_to_world(scan, pose)
-                R, t, _, ok = icp(scan_world, self.prev_scan_world, max_distance=20)
+            # ICP correction: scan-to-map matching
+            if self.use_icp and len(scan) > 5:
+                map_points = self.grid.get_occupied_points()
 
-                if ok:
-                    corr_pos = R @ np.array([pose[0], pose[1]]) + t
-                    corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
-                    dx = corr_pos[0] - pose[0]
-                    dy = corr_pos[1] - pose[1]
-                    self.robot.x = corr_pos[0]
-                    self.robot.y = corr_pos[1]
-                    self.robot._heading += corr_angle
-                    pose = self.robot.get_pose()
-                    self.icp_result = {
-                        "status": "converged",
-                        "dx": round(dx, 1),
-                        "dy": round(dy, 1),
-                        "dtheta": round(corr_angle, 1),
-                    }
-                    print(
-                        f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}°"
-                    )
+                if len(map_points) > 10:
+                    scan_world = self._scan_to_world(scan, pose)
+                    R, t, _, ok = icp(scan_world, map_points, max_distance=20)
+
+                    if ok:
+                        corr_pos = R @ np.array([pose[0], pose[1]]) + t
+                        corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+                        dx = corr_pos[0] - pose[0]
+                        dy = corr_pos[1] - pose[1]
+                        self.robot.x = corr_pos[0]
+                        self.robot.y = corr_pos[1]
+                        self.robot._heading += corr_angle
+                        pose = self.robot.get_pose()
+                        self.icp_result = {
+                            "status": "converged",
+                            "dx": round(dx, 1),
+                            "dy": round(dy, 1),
+                            "dtheta": round(corr_angle, 1),
+                            "map_pts": len(map_points),
+                        }
+                        print(
+                            f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° (map: {len(map_points)} pts)"
+                        )
+                    else:
+                        self.icp_result = {
+                            "status": "failed",
+                            "map_pts": len(map_points),
+                        }
+                        print(f"ICP failed to converge (map: {len(map_points)} pts)")
                 else:
-                    self.icp_result = {"status": "failed"}
-                    print("ICP failed to converge")
-            elif self.use_icp and self.prev_scan_world is None:
-                self.icp_result = {"status": "first_scan"}
+                    self.icp_result = {"status": "building_map"}
 
             # Update grid
             self.grid.update(scan, pose)
             self.pose = pose
             self.map_version += 1
-
-            # Store for next ICP
-            if self.use_icp:
-                self.prev_scan_world = self._scan_to_world(scan, pose)
 
         except Exception as e:
             self.state = "ERROR"
