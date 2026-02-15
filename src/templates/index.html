@@ -153,21 +153,26 @@ canvas.onclick = (e) => {
 // p=0 (free) → light teal, p=0.5 (unknown) → dark navy, p=1 (wall) → bright orange
 
 function probToColor(p) {
-  if (p < 0.5) {
-    // Free (0) → Unknown (0.5):  light teal → dark navy
-    const t = p / 0.5; // 0..1
+  // Radar-style: dark everywhere, only walls glow
+  if (p < 0.45) {
+    // Free (0) → Near-unknown (0.45): subtle dark blue, slightly lighter when very free
+    const t = p / 0.45; // 0→1
     return [
-      lerp(220, 18, t),  // R
-      lerp(245, 22, t),  // G
-      lerp(240, 40, t),  // B
+      lerp(25, 16, t),   // R
+      lerp(35, 18, t),   // G
+      lerp(60, 32, t),   // B
     ];
+  } else if (p < 0.55) {
+    // Unknown band (0.45–0.55): dark base (fog of war)
+    return [16, 18, 32];
   } else {
-    // Unknown (0.5) → Occupied (1):  dark navy → bright warm
-    const t = (p - 0.5) / 0.5; // 0..1
+    // Occupied (0.55→1): dark → bright cyan/white glow
+    const t = (p - 0.55) / 0.45; // 0→1
+    const t2 = t * t; // ease-in for punchier walls
     return [
-      lerp(18, 255, t),   // R
-      lerp(22, 120, t),   // G
-      lerp(40, 50, t),    // B
+      lerp(20, 200, t2),   // R
+      lerp(30, 240, t2),   // G
+      lerp(50, 255, t2),   // B
     ];
   }
 }

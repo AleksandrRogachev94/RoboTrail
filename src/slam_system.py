@@ -148,9 +148,13 @@ class SlamSystem:
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""
         self.state = "SCANNING"
-        self.message = "Scanning..."
+        self.message = "Calibrating gyro..."
 
         try:
+            # ZUPT: re-zero gyro bias while stopped to combat drift
+            self.robot.imu.calibrate_gyro(samples=100)
+
+            self.message = "Scanning..."
             scan = self.scanner.scan()
             pose = self.robot.get_pose()
 
