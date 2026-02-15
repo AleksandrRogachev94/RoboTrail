@@ -31,6 +31,7 @@ class SlamSystem:
         self.pose = (0.0, 0.0, 0.0)  # x, y, heading_deg
         self.target = None  # (x, y) or None
         self.message = "Initializing..."
+        self.map_version = 0
 
         # Hardware
         self.chip = None
@@ -82,10 +83,11 @@ class SlamSystem:
         x_max, y_max = self.grid.grid_to_world(r1, c1)
 
         return {
-            "grid": cropped.tolist(),
+            "grid": np.round(cropped, 2).tolist(),
             "bounds": [x_min, x_max, y_min, y_max],
             "rows": cropped.shape[0],
             "cols": cropped.shape[1],
+            "version": self.map_version,
         }
 
     # ── Background loop ───────────────────────────────────────────────
@@ -171,6 +173,7 @@ class SlamSystem:
             # Update grid
             self.grid.update(scan, pose)
             self.pose = pose
+            self.map_version += 1
 
             # Store for next ICP
             if self.use_icp:

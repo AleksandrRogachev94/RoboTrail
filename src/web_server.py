@@ -29,6 +29,7 @@ def get_state():
             "pose": slam.pose,
             "target": slam.target,
             "message": slam.message,
+            "map_version": slam.map_version,
         }
     )
 

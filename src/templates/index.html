@@ -8,71 +8,111 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: system-ui, sans-serif;
-    background: #1a1a2e;
+    background: #0f0f1a;
     color: #e0e0e0;
     display: flex;
     flex-direction: column;
     align-items: center;
     padding: 16px;
-    height: 100vh;
+    min-height: 100vh;
   }
-  h1 { font-size: 1.4em; margin-bottom: 8px; color: #eee; }
+  h1 {
+    font-size: 1.5em;
+    margin-bottom: 10px;
+    color: #fff;
+    letter-spacing: 1px;
+  }
   #status {
-    background: #16213e;
-    padding: 8px 16px;
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(8px);
+    padding: 8px 20px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .s-idle { color: #4ecca3; }
+  .s-moving { color: #f7b731; }
+  .s-scanning { color: #45aaf2; }
+  .s-error { color: #fc5c65; }
+  #status .label { color: #888; }
+  #status .val { color: #4ecca3; }
+
+  .canvas-wrap {
+    position: relative;
     border-radius: 6px;
-    margin-bottom: 12px;
-    font-family: monospace;
-    font-size: 0.9em;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   }
-  #status span { color: #4ecca3; }
   canvas {
-    border: 1px solid #333;
+    display: block;
     cursor: crosshair;
-    background: #0f0f23;
   }
-  #hint { font-size: 0.8em; color: #666; margin-top: 8px; }
+  /* Axis labels drawn on canvas, but we add a subtle info line below */
+  #hint {
+    font-size: 0.75em;
+    color: #555;
+    margin-top: 10px;
+    font-style: italic;
+  }
 </style>
 </head>
 <body>
 
-<h1>RoboTrail</h1>
+<h1>🤖 RoboTrail</h1>
 <div id="status">
-  <span id="st">--</span> &nbsp;|&nbsp;
-  Pose: <span id="pose">--</span> &nbsp;|&nbsp;
-  <span id="msg">--</span>
+  <span class="label">State:</span> <span id="st" class="s-idle">--</span>
+  &nbsp;·&nbsp;
+  <span class="label">Pose:</span> <span id="pose" class="val">--</span>
+  &nbsp;·&nbsp;
+  <span id="msg" style="color:#777">--</span>
 </div>
-<canvas id="c" width="700" height="700"></canvas>
-<div id="hint">Click on map to move robot</div>
+<div class="canvas-wrap">
+  <canvas id="c" width="720" height="720"></canvas>
+</div>
+<div id="hint">click on map to move robot</div>
 
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
 
-let mapData = null;   // {grid, bounds, rows, cols}
-let pose = [0, 0, 0]; // x, y, heading_deg
+let mapData = null;     // {grid, bounds, rows, cols, version}
+let mapVersion = -1;    // track last fetched version
+let pose = [0, 0, 0];
 let target = null;
 let state = 'IDLE';
 
-// ── Polling ──────────────────────────────────────────────────────
+// ── Single unified poll ──────────────────────────────────────────
 
-setInterval(pollState, 500);
-setInterval(pollMap, 1500);
+setInterval(poll, 1000);
 
-function pollState() {
+function poll() {
   fetch('/api/state').then(r => r.json()).then(d => {
     state = d.state;
     pose = d.pose;
     target = d.target;
-    document.getElementById('st').textContent = d.state;
+
+    // Update status bar
+    const stEl = document.getElementById('st');
+    stEl.textContent = d.state;
+    stEl.className = 's-' + d.state.toLowerCase();
     document.getElementById('pose').textContent =
       `(${d.pose[0].toFixed(1)}, ${d.pose[1].toFixed(1)}, ${d.pose[2].toFixed(0)}°)`;
     document.getElementById('msg').textContent = d.message;
-    draw();
+
+    // Fetch map only when version changes
+    if (d.map_version !== mapVersion) {
+      mapVersion = d.map_version;
+      fetchMap();
+    } else {
+      draw(); // still redraw for target/pose overlay updates
+    }
   }).catch(() => {});
 }
 
-function pollMap() {
+function fetchMap() {
   fetch('/api/map').then(r => r.json()).then(d => {
     mapData = d;
     draw();
@@ -82,19 +122,23 @@ function pollMap() {
 // ── Click to move ────────────────────────────────────────────────
 
 canvas.onclick = (e) => {
-  if (state !== 'IDLE') return alert('Robot is busy');
-  if (!mapData) return alert('Map not ready');
+  if (state !== 'IDLE') return;
+  if (!mapData) return;
 
   const rect = canvas.getBoundingClientRect();
   const px = e.clientX - rect.left;
   const py = e.clientY - rect.top;
-
   const [xmin, xmax, ymin, ymax] = mapData.bounds;
 
-  // Canvas X -> world X (left to right)
-  const wx = xmin + (px / canvas.width) * (xmax - xmin);
-  // Canvas Y -> world Y (top=ymax, bottom=ymin, since canvas Y is inverted)
-  const wy = ymax - (py / canvas.height) * (ymax - ymin);
+  // Map uses MARGIN for axis labels
+  const mx = MARGIN, my = MARGIN;
+  const mw = W - MARGIN * 2, mh = H - MARGIN * 2;
+
+  // Only respond to clicks inside the map area
+  if (px < mx || px > mx + mw || py < my || py > my + mh) return;
+
+  const wx = xmin + ((px - mx) / mw) * (xmax - xmin);
+  const wy = ymax - ((py - my) / mh) * (ymax - ymin);
 
   if (confirm(`Move to (${wx.toFixed(0)}, ${wy.toFixed(0)}) cm?`)) {
     fetch('/api/target', {
@@ -105,14 +149,41 @@ canvas.onclick = (e) => {
   }
 };
 
+// ── Colormap ─────────────────────────────────────────────────────
+// p=0 (free) → light teal, p=0.5 (unknown) → dark navy, p=1 (wall) → bright orange
+
+function probToColor(p) {
+  if (p < 0.5) {
+    // Free (0) → Unknown (0.5):  light teal → dark navy
+    const t = p / 0.5; // 0..1
+    return [
+      lerp(220, 18, t),  // R
+      lerp(245, 22, t),  // G
+      lerp(240, 40, t),  // B
+    ];
+  } else {
+    // Unknown (0.5) → Occupied (1):  dark navy → bright warm
+    const t = (p - 0.5) / 0.5; // 0..1
+    return [
+      lerp(18, 255, t),   // R
+      lerp(22, 120, t),   // G
+      lerp(40, 50, t),    // B
+    ];
+  }
+}
+
+function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+
 // ── Drawing ──────────────────────────────────────────────────────
 
+const MARGIN = 40; // pixels for axis labels
+
 function draw() {
-  const W = canvas.width, H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0f0f1a';
+  ctx.fillRect(0, 0, W, H);
 
   if (!mapData) {
-    ctx.fillStyle = '#333';
+    ctx.fillStyle = '#444';
     ctx.font = '16px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Waiting for map...', W/2, H/2);
@@ -122,65 +193,119 @@ function draw() {
   const {grid, bounds, rows, cols} = mapData;
   const [xmin, xmax, ymin, ymax] = bounds;
 
-  // Draw occupancy grid
-  const cellW = W / cols;
-  const cellH = H / rows;
+  // Map drawing area (inside margins)
+  const mx = MARGIN, my = MARGIN;
+  const mw = W - MARGIN * 2, mh = H - MARGIN * 2;
+
+  // Create ImageData for smooth rendering
+  // We render at grid resolution, then scale to canvas
+  const imgData = ctx.createImageData(cols, rows);
+  const d = imgData.data;
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const p = grid[r][c]; // 0=free, 0.5=unknown, 1=occupied
-      // Color: free=white, unknown=gray, occupied=black
-      const v = Math.round((1 - p) * 255);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      // grid row 0 = bottom of world, but canvas row 0 = top
-      // so flip: canvas_y = (rows - 1 - r)
-      ctx.fillRect(c * cellW, (rows - 1 - r) * cellH, cellW + 0.5, cellH + 0.5);
+      const p = grid[r][c];
+      const [cr_, cg, cb] = probToColor(p);
+      // Flip row: grid row 0 = world bottom → image row (rows-1)
+      const imgRow = rows - 1 - r;
+      const idx = (imgRow * cols + c) * 4;
+      d[idx] = cr_;
+      d[idx+1] = cg;
+      d[idx+2] = cb;
+      d[idx+3] = 255;
     }
   }
 
-  // Helper: world coords -> canvas pixel
-  function toCanvas(wx, wy) {
-    const px = ((wx - xmin) / (xmax - xmin)) * W;
-    const py = ((ymax - wy) / (ymax - ymin)) * H;
-    return [px, py];
+  // Draw to offscreen canvas at native resolution, then scale up smoothly
+  const offscreen = new OffscreenCanvas(cols, rows);
+  const offCtx = offscreen.getContext('2d');
+  offCtx.putImageData(imgData, 0, 0);
+
+  // Scale to map area with smooth interpolation
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offscreen, mx, my, mw, mh);
+
+  // ── Axis labels ──────────────────────────────────────────────
+  ctx.fillStyle = '#666';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'center';
+
+  // X axis (bottom)
+  const xSteps = 5;
+  for (let i = 0; i <= xSteps; i++) {
+    const val = xmin + (xmax - xmin) * i / xSteps;
+    const px = mx + mw * i / xSteps;
+    ctx.fillText(val.toFixed(0), px, H - 8);
+    // Tick
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath(); ctx.moveTo(px, my); ctx.lineTo(px, my + mh); ctx.stroke();
   }
 
-  // Draw robot
-  const [rx, ry] = toCanvas(pose[0], pose[1]);
+  // Y axis (left)
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= xSteps; i++) {
+    const val = ymin + (ymax - ymin) * i / xSteps;
+    const py = my + mh - mh * i / xSteps;
+    ctx.fillText(val.toFixed(0), mx - 4, py + 4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath(); ctx.moveTo(mx, py); ctx.lineTo(mx + mw, py); ctx.stroke();
+  }
+
+  // Axis titles
+  ctx.fillStyle = '#555';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('X (cm)', W/2, H - 0);
+  ctx.save();
+  ctx.translate(10, H/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText('Y (cm)', 0, 0);
+  ctx.restore();
+
+  // ── Robot ────────────────────────────────────────────────────
+  const [rx, ry] = worldToCanvas(pose[0], pose[1], bounds, mx, my, mw, mh);
   const heading = pose[2] * Math.PI / 180;
-  const sz = 10;
+  const sz = 12;
 
   ctx.save();
   ctx.translate(rx, ry);
-  // Canvas: 0 rad = right, positive = clockwise
-  // World heading: 0 = +X (right), positive = CCW
-  // Canvas rotation needs negated heading for CCW convention
-  ctx.rotate(-heading);
+  ctx.rotate(-heading); // negate for canvas coords
   ctx.beginPath();
-  ctx.moveTo(sz, 0);           // nose (pointing right = forward)
-  ctx.lineTo(-sz * 0.6, -sz * 0.5);
-  ctx.lineTo(-sz * 0.6, sz * 0.5);
+  ctx.moveTo(sz, 0);
+  ctx.lineTo(-sz * 0.7, -sz * 0.55);
+  ctx.lineTo(-sz * 0.3, 0);
+  ctx.lineTo(-sz * 0.7, sz * 0.55);
   ctx.closePath();
   ctx.fillStyle = '#e74c3c';
   ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
   ctx.restore();
 
-  // Draw target
+  // ── Target ───────────────────────────────────────────────────
   if (target) {
-    const [tx, ty] = toCanvas(target[0], target[1]);
-    ctx.beginPath();
-    ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+    const [tx, ty] = worldToCanvas(target[0], target[1], bounds, mx, my, mw, mh);
+    // Crosshair
     ctx.strokeStyle = '#4ecca3';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(tx, ty, 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#4ecca3';
-    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(tx-8, ty); ctx.lineTo(tx+8, ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx, ty-8); ctx.lineTo(tx, ty+8); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI*2); ctx.stroke();
   }
 }
 
-// Initial draw
+function worldToCanvas(wx, wy, bounds, mx, my, mw, mh) {
+  const [xmin, xmax, ymin, ymax] = bounds;
+  const px = mx + ((wx - xmin) / (xmax - xmin)) * mw;
+  const py = my + ((ymax - wy) / (ymax - ymin)) * mh;
+  return [px, py];
+}
+
+// Initial
 draw();
+poll();
 </script>
 </body>
 </html>
