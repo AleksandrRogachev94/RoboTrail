@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoboTrail</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    height: 100vh;
+  }
+  h1 { font-size: 1.4em; margin-bottom: 8px; color: #eee; }
+  #status {
+    background: #16213e;
+    padding: 8px 16px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    font-family: monospace;
+    font-size: 0.9em;
+  }
+  #status span { color: #4ecca3; }
+  canvas {
+    border: 1px solid #333;
+    cursor: crosshair;
+    background: #0f0f23;
+  }
+  #hint { font-size: 0.8em; color: #666; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>RoboTrail</h1>
+<div id="status">
+  <span id="st">--</span> &nbsp;|&nbsp;
+  Pose: <span id="pose">--</span> &nbsp;|&nbsp;
+  <span id="msg">--</span>
+</div>
+<canvas id="c" width="700" height="700"></canvas>
+<div id="hint">Click on map to move robot</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let mapData = null;   // {grid, bounds, rows, cols}
+let pose = [0, 0, 0]; // x, y, heading_deg
+let target = null;
+let state = 'IDLE';
+
+// ── Polling ──────────────────────────────────────────────────────
+
+setInterval(pollState, 500);
+setInterval(pollMap, 1500);
+
+function pollState() {
+  fetch('/api/state').then(r => r.json()).then(d => {
+    state = d.state;
+    pose = d.pose;
+    target = d.target;
+    document.getElementById('st').textContent = d.state;
+    document.getElementById('pose').textContent =
+      `(${d.pose[0].toFixed(1)}, ${d.pose[1].toFixed(1)}, ${d.pose[2].toFixed(0)}°)`;
+    document.getElementById('msg').textContent = d.message;
+    draw();
+  }).catch(() => {});
+}
+
+function pollMap() {
+  fetch('/api/map').then(r => r.json()).then(d => {
+    mapData = d;
+    draw();
+  }).catch(() => {});
+}
+
+// ── Click to move ────────────────────────────────────────────────
+
+canvas.onclick = (e) => {
+  if (state !== 'IDLE') return alert('Robot is busy');
+  if (!mapData) return alert('Map not ready');
+
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+
+  const [xmin, xmax, ymin, ymax] = mapData.bounds;
+
+  // Canvas X -> world X (left to right)
+  const wx = xmin + (px / canvas.width) * (xmax - xmin);
+  // Canvas Y -> world Y (top=ymax, bottom=ymin, since canvas Y is inverted)
+  const wy = ymax - (py / canvas.height) * (ymax - ymin);
+
+  if (confirm(`Move to (${wx.toFixed(0)}, ${wy.toFixed(0)}) cm?`)) {
+    fetch('/api/target', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({x: wx, y: wy})
+    });
+  }
+};
+
+// ── Drawing ──────────────────────────────────────────────────────
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  if (!mapData) {
+    ctx.fillStyle = '#333';
+    ctx.font = '16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Waiting for map...', W/2, H/2);
+    return;
+  }
+
+  const {grid, bounds, rows, cols} = mapData;
+  const [xmin, xmax, ymin, ymax] = bounds;
+
+  // Draw occupancy grid
+  const cellW = W / cols;
+  const cellH = H / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const p = grid[r][c]; // 0=free, 0.5=unknown, 1=occupied
+      // Color: free=white, unknown=gray, occupied=black
+      const v = Math.round((1 - p) * 255);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      // grid row 0 = bottom of world, but canvas row 0 = top
+      // so flip: canvas_y = (rows - 1 - r)
+      ctx.fillRect(c * cellW, (rows - 1 - r) * cellH, cellW + 0.5, cellH + 0.5);
+    }
+  }
+
+  // Helper: world coords -> canvas pixel
+  function toCanvas(wx, wy) {
+    const px = ((wx - xmin) / (xmax - xmin)) * W;
+    const py = ((ymax - wy) / (ymax - ymin)) * H;
+    return [px, py];
+  }
+
+  // Draw robot
+  const [rx, ry] = toCanvas(pose[0], pose[1]);
+  const heading = pose[2] * Math.PI / 180;
+  const sz = 10;
+
+  ctx.save();
+  ctx.translate(rx, ry);
+  // Canvas: 0 rad = right, positive = clockwise
+  // World heading: 0 = +X (right), positive = CCW
+  // Canvas rotation needs negated heading for CCW convention
+  ctx.rotate(-heading);
+  ctx.beginPath();
+  ctx.moveTo(sz, 0);           // nose (pointing right = forward)
+  ctx.lineTo(-sz * 0.6, -sz * 0.5);
+  ctx.lineTo(-sz * 0.6, sz * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = '#e74c3c';
+  ctx.fill();
+  ctx.restore();
+
+  // Draw target
+  if (target) {
+    const [tx, ty] = toCanvas(target[0], target[1]);
+    ctx.beginPath();
+    ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = '#4ecca3';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ty, 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#4ecca3';
+    ctx.fill();
+  }
+}
+
+// Initial draw
+draw();
+</script>
+</body>
+</html>
