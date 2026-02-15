@@ -123,32 +123,70 @@ class SlamSystem:
             self.message = f"Init error: {e}"
             traceback.print_exc()
 
+    MAX_ARC_ANGLE_DEG = 30  # scan every ~30° of heading change
+
     def _move_scan_update(self, target):
-        """Move to target, then scan and update map."""
+        """Move to target with intermediate scans for large heading changes."""
         tx, ty = target
 
-        # 1. Move
         self.state = "MOVING"
-        self.message = "Calibrating gyro..."
         try:
-            # ZUPT: re-zero gyro bias while stopped to combat heading drift
+            # ZUPT before first move
+            self.message = "Calibrating gyro..."
             self.robot.imu.calibrate_gyro(samples=100)
 
-            self.message = f"Moving to ({tx:.1f}, {ty:.1f})..."
-            print(f"Moving to ({tx:.1f}, {ty:.1f})...")
-            self.robot.move_to(tx, ty)
-            self.pose = self.robot.get_pose()
+            # Check arc angle to target
+            result = self.robot.arc_to_point(tx, ty)
+
+            if result[0] is not None:
+                radius, arc_length = result
+                arc_angle_deg = abs(math.degrees(arc_length / radius))
+            else:
+                arc_angle_deg = 0  # straight line
+
+            if arc_angle_deg > self.MAX_ARC_ANGLE_DEG:
+                # Large heading change — use intermediate waypoints
+                n_segments = math.ceil(arc_angle_deg / self.MAX_ARC_ANGLE_DEG)
+                print(
+                    f"Large arc ({arc_angle_deg:.0f}°), splitting into {n_segments} segments"
+                )
+
+                sx, sy = self.robot.x, self.robot.y  # start position
+                for i in range(1, n_segments + 1):
+                    if i < n_segments:
+                        # Intermediate waypoint: fraction of the way from start to target
+                        frac = i / n_segments
+                        wx = sx + frac * (tx - sx)
+                        wy = sy + frac * (ty - sy)
+                        self._do_move(wx, wy)
+                        self._scan_and_update()
+                        # ZUPT before next segment
+                        self.state = "MOVING"
+                        self.message = "Calibrating gyro..."
+                        self.robot.imu.calibrate_gyro(samples=100)
+                    else:
+                        self._do_move(tx, ty)
+            else:
+                # Small arc or straight — one move
+                self._do_move(tx, ty)
+
         except Exception as e:
             self.state = "ERROR"
             self.message = f"Move failed: {e}"
             traceback.print_exc()
             return
 
-        # 2. Scan + update
+        # Final scan
         self._scan_and_update()
-
         self.state = "IDLE"
         self.message = "Ready"
+
+    def _do_move(self, x, y):
+        """Execute a single move_to and update pose."""
+        self.message = f"Moving to ({x:.1f}, {y:.1f})..."
+        print(f"Moving to ({x:.1f}, {y:.1f})...")
+        self.robot.move_to(x, y)
+        self.pose = self.robot.get_pose()
 
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""
