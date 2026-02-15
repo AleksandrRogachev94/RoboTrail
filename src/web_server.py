@@ -30,6 +30,7 @@ def get_state():
             "target": slam.target,
             "message": slam.message,
             "map_version": slam.map_version,
+            "icp": slam.icp_result,
         }
     )
 

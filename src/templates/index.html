@@ -68,6 +68,9 @@
   &nbsp;·&nbsp;
   <span id="msg" style="color:#777">--</span>
 </div>
+<div id="icp-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:10px;color:#666">
+  ICP: <span id="icp">--</span>
+</div>
 <div class="canvas-wrap">
   <canvas id="c" width="720" height="720"></canvas>
 </div>
@@ -101,6 +104,21 @@ function poll() {
     document.getElementById('pose').textContent =
       `(${d.pose[0].toFixed(1)}, ${d.pose[1].toFixed(1)}, ${d.pose[2].toFixed(0)}°)`;
     document.getElementById('msg').textContent = d.message;
+
+    // ICP display
+    const icpEl = document.getElementById('icp');
+    if (d.icp) {
+      if (d.icp.status === 'converged') {
+        icpEl.style.color = '#4ecca3';
+        icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}°`;
+      } else if (d.icp.status === 'failed') {
+        icpEl.style.color = '#fc5c65';
+        icpEl.textContent = '✗ failed to converge';
+      } else {
+        icpEl.style.color = '#666';
+        icpEl.textContent = d.icp.status;
+      }
+    }
 
     // Fetch map only when version changes
     if (d.map_version !== mapVersion) {

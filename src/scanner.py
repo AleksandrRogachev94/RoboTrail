@@ -33,7 +33,7 @@ class Scanner:
             channel=2, reversed=servo_reversed, angle_offset=SERVO_ANGLE_OFFSET
         )
 
-    def scan(self, from_angle=-90, to_angle=90):
+    def scan(self, from_angle=-60, to_angle=60):
         """
         Scan from from_angle to to_angle.
 

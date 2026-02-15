@@ -32,6 +32,7 @@ class SlamSystem:
         self.target = None  # (x, y) or None
         self.message = "Initializing..."
         self.map_version = 0
+        self.icp_result = None  # dict with last ICP result info
 
         # Hardware
         self.chip = None
@@ -166,13 +167,26 @@ class SlamSystem:
                 if ok:
                     corr_pos = R @ np.array([pose[0], pose[1]]) + t
                     corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+                    dx = corr_pos[0] - pose[0]
+                    dy = corr_pos[1] - pose[1]
                     self.robot.x = corr_pos[0]
                     self.robot.y = corr_pos[1]
                     self.robot._heading += corr_angle
                     pose = self.robot.get_pose()
+                    self.icp_result = {
+                        "status": "converged",
+                        "dx": round(dx, 1),
+                        "dy": round(dy, 1),
+                        "dtheta": round(corr_angle, 1),
+                    }
                     print(
-                        f"ICP corrected: ({pose[0]:.1f}, {pose[1]:.1f}, {pose[2]:.1f}°)"
+                        f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}°"
                     )
+                else:
+                    self.icp_result = {"status": "failed"}
+                    print("ICP failed to converge")
+            elif self.use_icp and self.prev_scan_world is None:
+                self.icp_result = {"status": "first_scan"}
 
             # Update grid
             self.grid.update(scan, pose)
