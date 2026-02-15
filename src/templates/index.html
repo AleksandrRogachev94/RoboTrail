@@ -123,22 +123,19 @@ function fetchMap() {
 
 canvas.onclick = (e) => {
   if (state !== 'IDLE') return;
-  if (!mapData) return;
+  if (!mapData || !mapLayout) return;
 
   const rect = canvas.getBoundingClientRect();
   const px = e.clientX - rect.left;
   const py = e.clientY - rect.top;
   const [xmin, xmax, ymin, ymax] = mapData.bounds;
-
-  // Map uses MARGIN for axis labels
-  const mx = MARGIN, my = MARGIN;
-  const mw = W - MARGIN * 2, mh = H - MARGIN * 2;
+  const {ox, oy, w, h} = mapLayout;
 
   // Only respond to clicks inside the map area
-  if (px < mx || px > mx + mw || py < my || py > my + mh) return;
+  if (px < ox || px > ox + w || py < oy || py > oy + h) return;
 
-  const wx = xmin + ((px - mx) / mw) * (xmax - xmin);
-  const wy = ymax - ((py - my) / mh) * (ymax - ymin);
+  const wx = xmin + ((px - ox) / w) * (xmax - xmin);
+  const wy = ymax - ((py - oy) / h) * (ymax - ymin);
 
   if (confirm(`Move to (${wx.toFixed(0)}, ${wy.toFixed(0)}) cm?`)) {
     fetch('/api/target', {
@@ -150,29 +147,25 @@ canvas.onclick = (e) => {
 };
 
 // ── Colormap ─────────────────────────────────────────────────────
-// p=0 (free) → light teal, p=0.5 (unknown) → dark navy, p=1 (wall) → bright orange
 
 function probToColor(p) {
-  // Radar-style: dark everywhere, only walls glow
-  if (p < 0.45) {
-    // Free (0) → Near-unknown (0.45): subtle dark blue, slightly lighter when very free
-    const t = p / 0.45; // 0→1
-    return [
-      lerp(25, 16, t),   // R
-      lerp(35, 18, t),   // G
-      lerp(60, 32, t),   // B
-    ];
-  } else if (p < 0.55) {
-    // Unknown band (0.45–0.55): dark base (fog of war)
-    return [16, 18, 32];
+  // Dark everywhere. Only walls pop.
+  const bg = [14, 16, 28]; // base dark
+
+  if (p < 0.4) {
+    // Free space: very slightly lighter than background
+    return [18, 22, 38];
+  } else if (p < 0.6) {
+    // Unknown: dark base
+    return bg;
   } else {
-    // Occupied (0.55→1): dark → bright cyan/white glow
-    const t = (p - 0.55) / 0.45; // 0→1
-    const t2 = t * t; // ease-in for punchier walls
+    // Occupied (0.6→1.0): ramp to bright cyan-green
+    const t = (p - 0.6) / 0.4; // 0→1
+    const t3 = t * t * t; // cubic ease-in: only very high p glows
     return [
-      lerp(20, 200, t2),   // R
-      lerp(30, 240, t2),   // G
-      lerp(50, 255, t2),   // B
+      lerp(14, 80, t3),    // R: stays dark
+      lerp(16, 255, t3),   // G: bright green
+      lerp(28, 220, t3),   // B: cyan tint
     ];
   }
 }
@@ -181,10 +174,11 @@ function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
 
 // ── Drawing ──────────────────────────────────────────────────────
 
-const MARGIN = 40; // pixels for axis labels
+const MARGIN = 40;
+let mapLayout = null; // {ox, oy, w, h} — map drawing rect, set in draw()
 
 function draw() {
-  ctx.fillStyle = '#0f0f1a';
+  ctx.fillStyle = '#0e0e1a';
   ctx.fillRect(0, 0, W, H);
 
   if (!mapData) {
@@ -198,84 +192,80 @@ function draw() {
   const {grid, bounds, rows, cols} = mapData;
   const [xmin, xmax, ymin, ymax] = bounds;
 
-  // Map drawing area (inside margins)
-  const mx = MARGIN, my = MARGIN;
-  const mw = W - MARGIN * 2, mh = H - MARGIN * 2;
+  // Available drawing area
+  const avail = W - MARGIN * 2;
 
-  // Create ImageData for smooth rendering
-  // We render at grid resolution, then scale to canvas
+  // Preserve aspect ratio
+  const worldW = xmax - xmin;
+  const worldH = ymax - ymin;
+  const scale = Math.min(avail / worldW, avail / worldH);
+  const drawW = worldW * scale;
+  const drawH = worldH * scale;
+
+  // Center in available area
+  const ox = MARGIN + (avail - drawW) / 2;
+  const oy = MARGIN + (avail - drawH) / 2;
+
+  mapLayout = {ox, oy, w: drawW, h: drawH};
+
+  // Build pixel image from grid
   const imgData = ctx.createImageData(cols, rows);
   const d = imgData.data;
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const p = grid[r][c];
-      const [cr_, cg, cb] = probToColor(p);
-      // Flip row: grid row 0 = world bottom → image row (rows-1)
-      const imgRow = rows - 1 - r;
+      const [cr, cg, cb] = probToColor(p);
+      const imgRow = rows - 1 - r; // flip Y
       const idx = (imgRow * cols + c) * 4;
-      d[idx] = cr_;
+      d[idx] = cr;
       d[idx+1] = cg;
       d[idx+2] = cb;
       d[idx+3] = 255;
     }
   }
 
-  // Draw to offscreen canvas at native resolution, then scale up smoothly
+  // Render: crisp pixels (no blurring)
   const offscreen = new OffscreenCanvas(cols, rows);
   const offCtx = offscreen.getContext('2d');
   offCtx.putImageData(imgData, 0, 0);
 
-  // Scale to map area with smooth interpolation
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(offscreen, mx, my, mw, mh);
+  ctx.imageSmoothingEnabled = false; // crisp pixels
+  ctx.drawImage(offscreen, ox, oy, drawW, drawH);
 
-  // ── Axis labels ──────────────────────────────────────────────
-  ctx.fillStyle = '#666';
-  ctx.font = '11px monospace';
-  ctx.textAlign = 'center';
-
-  // X axis (bottom)
-  const xSteps = 5;
-  for (let i = 0; i <= xSteps; i++) {
-    const val = xmin + (xmax - xmin) * i / xSteps;
-    const px = mx + mw * i / xSteps;
-    ctx.fillText(val.toFixed(0), px, H - 8);
-    // Tick
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.beginPath(); ctx.moveTo(px, my); ctx.lineTo(px, my + mh); ctx.stroke();
-  }
-
-  // Y axis (left)
-  ctx.textAlign = 'right';
-  for (let i = 0; i <= xSteps; i++) {
-    const val = ymin + (ymax - ymin) * i / xSteps;
-    const py = my + mh - mh * i / xSteps;
-    ctx.fillText(val.toFixed(0), mx - 4, py + 4);
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.beginPath(); ctx.moveTo(mx, py); ctx.lineTo(mx + mw, py); ctx.stroke();
-  }
-
-  // Axis titles
+  // ── Grid lines + axis labels ─────────────────────────────────
   ctx.fillStyle = '#555';
-  ctx.font = '12px monospace';
+  ctx.font = '11px monospace';
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 0.5;
+
+  // X axis
   ctx.textAlign = 'center';
-  ctx.fillText('X (cm)', W/2, H - 0);
-  ctx.save();
-  ctx.translate(10, H/2);
-  ctx.rotate(-Math.PI/2);
-  ctx.fillText('Y (cm)', 0, 0);
-  ctx.restore();
+  const nTicks = 5;
+  for (let i = 0; i <= nTicks; i++) {
+    const val = xmin + worldW * i / nTicks;
+    const px = ox + drawW * i / nTicks;
+    ctx.fillText(val.toFixed(0), px, oy + drawH + 16);
+    ctx.beginPath(); ctx.moveTo(px, oy); ctx.lineTo(px, oy + drawH); ctx.stroke();
+  }
+
+  // Y axis
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= nTicks; i++) {
+    const val = ymin + worldH * i / nTicks;
+    const py = oy + drawH - drawH * i / nTicks;
+    ctx.fillText(val.toFixed(0), ox - 4, py + 4);
+    ctx.beginPath(); ctx.moveTo(ox, py); ctx.lineTo(ox + drawW, py); ctx.stroke();
+  }
 
   // ── Robot ────────────────────────────────────────────────────
-  const [rx, ry] = worldToCanvas(pose[0], pose[1], bounds, mx, my, mw, mh);
+  const [rx, ry] = w2c(pose[0], pose[1]);
   const heading = pose[2] * Math.PI / 180;
   const sz = 12;
 
   ctx.save();
   ctx.translate(rx, ry);
-  ctx.rotate(-heading); // negate for canvas coords
+  ctx.rotate(-heading);
   ctx.beginPath();
   ctx.moveTo(sz, 0);
   ctx.lineTo(-sz * 0.7, -sz * 0.55);
@@ -291,8 +281,7 @@ function draw() {
 
   // ── Target ───────────────────────────────────────────────────
   if (target) {
-    const [tx, ty] = worldToCanvas(target[0], target[1], bounds, mx, my, mw, mh);
-    // Crosshair
+    const [tx, ty] = w2c(target[0], target[1]);
     ctx.strokeStyle = '#4ecca3';
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(tx-8, ty); ctx.lineTo(tx+8, ty); ctx.stroke();
@@ -301,11 +290,14 @@ function draw() {
   }
 }
 
-function worldToCanvas(wx, wy, bounds, mx, my, mw, mh) {
-  const [xmin, xmax, ymin, ymax] = bounds;
-  const px = mx + ((wx - xmin) / (xmax - xmin)) * mw;
-  const py = my + ((ymax - wy) / (ymax - ymin)) * mh;
-  return [px, py];
+function w2c(wx, wy) {
+  if (!mapData || !mapLayout) return [0, 0];
+  const [xmin, xmax, ymin, ymax] = mapData.bounds;
+  const {ox, oy, w, h} = mapLayout;
+  return [
+    ox + ((wx - xmin) / (xmax - xmin)) * w,
+    oy + ((ymax - wy) / (ymax - ymin)) * h,
+  ];
 }
 
 // Initial

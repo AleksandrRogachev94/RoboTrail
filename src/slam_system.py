@@ -128,8 +128,12 @@ class SlamSystem:
 
         # 1. Move
         self.state = "MOVING"
-        self.message = f"Moving to ({tx:.1f}, {ty:.1f})..."
+        self.message = "Calibrating gyro..."
         try:
+            # ZUPT: re-zero gyro bias while stopped to combat heading drift
+            self.robot.imu.calibrate_gyro(samples=100)
+
+            self.message = f"Moving to ({tx:.1f}, {ty:.1f})..."
             print(f"Moving to ({tx:.1f}, {ty:.1f})...")
             self.robot.move_to(tx, ty)
             self.pose = self.robot.get_pose()
@@ -148,13 +152,9 @@ class SlamSystem:
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""
         self.state = "SCANNING"
-        self.message = "Calibrating gyro..."
+        self.message = "Scanning..."
 
         try:
-            # ZUPT: re-zero gyro bias while stopped to combat drift
-            self.robot.imu.calibrate_gyro(samples=100)
-
-            self.message = "Scanning..."
             scan = self.scanner.scan()
             pose = self.robot.get_pose()
 
