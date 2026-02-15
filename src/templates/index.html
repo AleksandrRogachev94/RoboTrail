@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RoboTrail</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -68,13 +69,19 @@
   &nbsp;·&nbsp;
   <span id="msg" style="color:#777">--</span>
 </div>
-<div id="icp-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:10px;color:#666">
+<div id="icp-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:4px;color:#666">
   ICP: <span id="icp">--</span>
+</div>
+<div id="pid-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:10px;color:#666">
+  PID: <span id="pid">waiting for movement...</span>
 </div>
 <div class="canvas-wrap">
   <canvas id="c" width="720" height="720"></canvas>
 </div>
 <div id="hint">click on map to move robot</div>
+<div style="margin-top:12px;width:720px">
+  <canvas id="pid-chart" height="150" style="background:#12121f;border-radius:4px"></canvas>
+</div>
 
 <script>
 const canvas = document.getElementById('c');
@@ -86,6 +93,7 @@ let mapVersion = -1;    // track last fetched version
 let pose = [0, 0, 0];
 let target = null;
 let state = 'IDLE';
+let path = [];          // [(x,y), ...] visited positions
 
 // ── Single unified poll ──────────────────────────────────────────
 
@@ -96,6 +104,7 @@ function poll() {
     state = d.state;
     pose = d.pose;
     target = d.target;
+    path = d.path || [];
 
     // Update status bar
     const stEl = document.getElementById('st');
@@ -121,6 +130,16 @@ function poll() {
         icpEl.style.color = '#666';
         icpEl.textContent = d.icp.status;
       }
+    }
+
+    // PID charts
+    const pidEl = document.getElementById('pid');
+    if (d.pid && d.pid.t && d.pid.t.length > 1) {
+      pidEl.style.color = '#b0b0b0';
+      const n = d.pid.t.length;
+      const dur = d.pid.t[n-1].toFixed(1);
+      pidEl.textContent = `${n} samples over ${dur}s`;
+      drawPidCharts(d.pid);
     }
 
     // Fetch map only when version changes
@@ -280,6 +299,28 @@ function draw() {
     ctx.fillText(val.toFixed(0), ox - 4, py + 4);
     ctx.beginPath(); ctx.moveTo(ox, py); ctx.lineTo(ox + drawW, py); ctx.stroke();
   }
+  // ── Path history ─────────────────────────────────────────────
+  if (path.length > 1) {
+    ctx.strokeStyle = 'rgba(78, 204, 163, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const [px0, py0] = w2c(path[0][0], path[0][1]);
+    ctx.moveTo(px0, py0);
+    for (let i = 1; i < path.length; i++) {
+      const [px, py] = w2c(path[i][0], path[i][1]);
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // Dots at each waypoint
+    ctx.fillStyle = 'rgba(78, 204, 163, 0.8)';
+    for (const pt of path) {
+      const [px, py] = w2c(pt[0], pt[1]);
+      ctx.beginPath();
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   // ── Robot ────────────────────────────────────────────────────
   const [rx, ry] = w2c(pose[0], pose[1]);
@@ -326,6 +367,89 @@ function w2c(wx, wy) {
 // Initial
 draw();
 poll();
+
+// ── PID Chart (Chart.js) ───────────────────────────────────────────
+
+let pidChart = null;
+
+function drawPidCharts(pid) {
+  const labels = pid.t.map(v => v.toFixed(2));
+
+  const data = {
+    labels,
+    datasets: [
+      {
+        label: 'Left PWM',
+        data: pid.left_pwm,
+        borderColor: '#45aaf2',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        yAxisID: 'yPWM',
+      },
+      {
+        label: 'Right PWM',
+        data: pid.right_pwm,
+        borderColor: '#f7b731',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        yAxisID: 'yPWM',
+      },
+      {
+        label: 'Heading Error',
+        data: pid.heading_error,
+        borderColor: '#4ecca3',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        borderDash: [4, 2],
+        yAxisID: 'yErr',
+      },
+    ],
+  };
+
+  const opts = {
+    responsive: true,
+    animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: {
+        labels: { color: '#888', font: { size: 10, family: 'monospace' }, boxWidth: 12 },
+      },
+    },
+    scales: {
+      x: {
+        title: { display: true, text: 'Time (s)', color: '#555', font: { size: 10 } },
+        ticks: { color: '#555', font: { size: 9 }, maxTicksLimit: 8 },
+        grid: { color: 'rgba(255,255,255,0.05)' },
+      },
+      yPWM: {
+        type: 'linear',
+        position: 'left',
+        title: { display: true, text: 'PWM %', color: '#45aaf2', font: { size: 10 } },
+        ticks: { color: '#45aaf2', font: { size: 9 } },
+        grid: { color: 'rgba(255,255,255,0.05)' },
+        min: 0,
+      },
+      yErr: {
+        type: 'linear',
+        position: 'right',
+        title: { display: true, text: 'Heading Err °', color: '#4ecca3', font: { size: 10 } },
+        ticks: { color: '#4ecca3', font: { size: 9 } },
+        grid: { drawOnChartArea: false },
+      },
+    },
+  };
+
+  if (pidChart) {
+    pidChart.data = data;
+    pidChart.update();
+  } else {
+    pidChart = new Chart(document.getElementById('pid-chart'), {
+      type: 'line',
+      data,
+      options: opts,
+    });
+  }
+}
 </script>
 </body>
 </html>

@@ -31,6 +31,8 @@ def get_state():
             "message": slam.message,
             "map_version": slam.map_version,
             "icp": slam.icp_result,
+            "path": slam.path_history,
+            "pid": slam.pid_summary,
         }
     )
 

@@ -33,6 +33,8 @@ class SlamSystem:
         self.message = "Initializing..."
         self.map_version = 0
         self.icp_result = None  # dict with last ICP result info
+        self.path_history = [(0.0, 0.0)]  # list of (x, y) visited
+        self.pid_summary = None  # last movement PID stats
 
         # Hardware
         self.chip = None
@@ -135,8 +137,22 @@ class SlamSystem:
 
             self.message = f"Moving to ({tx:.1f}, {ty:.1f})..."
             print(f"Moving to ({tx:.1f}, {ty:.1f})...")
+            self.robot.history = []  # clear PID log
             self.robot.move_to(tx, ty)
             self.pose = self.robot.get_pose()
+            self.path_history.append((self.pose[0], self.pose[1]))
+
+            # Store PID history for charts
+            if self.robot.history:
+                h = self.robot.history
+                # Downsample to max 100 points
+                step = max(1, len(h) // 100)
+                self.pid_summary = {
+                    "t": [round(s["t"], 3) for s in h[::step]],
+                    "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                    "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                    "heading_error": [round(s["heading_error"], 1) for s in h[::step]],
+                }
         except Exception as e:
             self.state = "ERROR"
             self.message = f"Move failed: {e}"
@@ -171,9 +187,9 @@ class SlamSystem:
                         corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
                         dx = corr_pos[0] - pose[0]
                         dy = corr_pos[1] - pose[1]
-                        self.robot.x = corr_pos[0]
-                        self.robot.y = corr_pos[1]
-                        self.robot._heading += corr_angle
+                        self.robot.set_pose(
+                            corr_pos[0], corr_pos[1], pose[2] + corr_angle
+                        )
                         pose = self.robot.get_pose()
                         self.icp_result = {
                             "status": "converged",

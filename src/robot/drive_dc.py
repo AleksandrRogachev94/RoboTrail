@@ -424,6 +424,12 @@ class RobotDC:
         """Return current pose (x, y, heading) in cm/degrees."""
         return (self.x, self.y, self._heading)
 
+    def set_pose(self, x: float, y: float, heading_deg: float) -> None:
+        """Set pose externally (e.g. after ICP correction)."""
+        self.x = x
+        self.y = y
+        self._heading = heading_deg
+
     def reset_pose(self) -> None:
         """Reset pose to origin."""
         self._heading = 0.0  # Current heading in degrees
