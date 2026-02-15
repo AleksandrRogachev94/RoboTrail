@@ -94,6 +94,7 @@ let pose = [0, 0, 0];
 let target = null;
 let state = 'IDLE';
 let path = [];          // [(x,y), ...] visited positions
+let icpCorr = [];       // [{from, to}, ...] ICP corrections
 
 // ── Single unified poll ──────────────────────────────────────────
 
@@ -105,6 +106,7 @@ function poll() {
     pose = d.pose;
     target = d.target;
     path = d.path || [];
+    icpCorr = d.icp_corrections || [];
 
     // Update status bar
     const stEl = document.getElementById('st');
@@ -301,7 +303,7 @@ function draw() {
   }
   // ── Path history ─────────────────────────────────────────────
   if (path.length > 1) {
-    ctx.strokeStyle = 'rgba(78, 204, 163, 0.5)';
+    ctx.strokeStyle = 'rgba(255, 200, 80, 0.6)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     const [px0, py0] = w2c(path[0][0], path[0][1]);
@@ -313,13 +315,38 @@ function draw() {
     ctx.stroke();
 
     // Dots at each waypoint
-    ctx.fillStyle = 'rgba(78, 204, 163, 0.8)';
+    ctx.fillStyle = 'rgba(255, 200, 80, 0.9)';
     for (const pt of path) {
       const [px, py] = w2c(pt[0], pt[1]);
       ctx.beginPath();
       ctx.arc(px, py, 3, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ── ICP corrections (arrows from odom → corrected) ──────────
+  for (const c of icpCorr) {
+    const [fx, fy] = w2c(c.from[0], c.from[1]);
+    const [tx, ty] = w2c(c.to[0], c.to[1]);
+    const len = Math.hypot(tx - fx, ty - fy);
+    if (len < 2) continue;
+    // Arrow line
+    ctx.strokeStyle = 'rgba(252, 92, 101, 0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
+    // Arrowhead
+    const angle = Math.atan2(ty - fy, tx - fx);
+    ctx.fillStyle = 'rgba(252, 92, 101, 0.7)';
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - 6 * Math.cos(angle - 0.5), ty - 6 * Math.sin(angle - 0.5));
+    ctx.lineTo(tx - 6 * Math.cos(angle + 0.5), ty - 6 * Math.sin(angle + 0.5));
+    ctx.closePath();
+    ctx.fill();
+    // Hollow circle at odom position
+    ctx.strokeStyle = 'rgba(252, 92, 101, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(fx, fy, 3, 0, Math.PI * 2); ctx.stroke();
   }
 
   // ── Robot ────────────────────────────────────────────────────

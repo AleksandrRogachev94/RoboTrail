@@ -34,6 +34,7 @@ class SlamSystem:
         self.map_version = 0
         self.icp_result = None  # dict with last ICP result info
         self.path_history = [(0.0, 0.0)]  # list of (x, y) visited
+        self.icp_corrections = []  # list of {"from": [x,y], "to": [x,y]}
         self.pid_summary = None  # last movement PID stats
 
         # Hardware
@@ -159,8 +160,20 @@ class SlamSystem:
             traceback.print_exc()
             return
 
-        # 2. Scan + update
+        # 2. Scan + update (ICP may correct pose)
+        odom_pos = (self.pose[0], self.pose[1])
         self._scan_and_update()
+
+        # Record ICP correction if it happened
+        corrected_pos = (self.pose[0], self.pose[1])
+        if self.icp_result and self.icp_result.get("status") == "converged":
+            self.path_history[-1] = corrected_pos  # update to corrected
+            self.icp_corrections.append(
+                {
+                    "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
+                    "to": [round(corrected_pos[0], 1), round(corrected_pos[1], 1)],
+                }
+            )
 
         self.state = "IDLE"
         self.message = "Ready"
