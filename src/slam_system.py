@@ -197,15 +197,41 @@ class SlamSystem:
         self.message = "Ready"
 
     def _move_one_step(self, wx, wy):
-        """Execute a single move to (wx, wy) with gyro calibration and PID logging."""
+        """Execute a single move to (wx, wy) with heading-aware control.
+
+        If heading difference to waypoint is large (>30°), turn first
+        to face it, then drive forward. Otherwise, use arc (move_to)
+        for smooth motion.
+        """
+        TURN_THRESHOLD = 30  # degrees — above this, turn in place first
+
         self.state = "MOVING"
         self.message = "Calibrating gyro..."
         try:
             self.robot.imu.calibrate_gyro(samples=100)
-            self.message = f"Moving to ({wx:.0f}, {wy:.0f})..."
-            print(f"  → move_to({wx:.0f}, {wy:.0f})")
+
+            # Compute heading difference to waypoint
+            dx = wx - self.pose[0]
+            dy = wy - self.pose[1]
+            target_heading = math.degrees(math.atan2(dy, dx))
+            heading_diff = (target_heading - self.pose[2] + 180) % 360 - 180
+            dist = math.hypot(dx, dy)
+
             self.robot.history = []
-            self.robot.move_to(wx, wy)
+
+            if abs(heading_diff) > TURN_THRESHOLD:
+                # Large heading mismatch — turn first, then drive straight
+                print(f"  ↻ turn({heading_diff:.0f}°) then forward({dist:.0f}cm)")
+                self.message = f"Turning {heading_diff:.0f}°..."
+                self.robot.turn(heading_diff)
+                self.message = f"Driving {dist:.0f}cm..."
+                self.robot.forward(dist)
+            else:
+                # Small mismatch — arc handles it smoothly
+                print(f"  → arc to ({wx:.0f}, {wy:.0f}), Δθ={heading_diff:.0f}°")
+                self.message = f"Moving to ({wx:.0f}, {wy:.0f})..."
+                self.robot.move_to(wx, wy)
+
             self.pose = self.robot.get_pose()
             self.path_history.append((self.pose[0], self.pose[1]))
 
