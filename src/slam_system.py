@@ -197,40 +197,47 @@ class SlamSystem:
         self.message = "Ready"
 
     def _move_one_step(self, wx, wy):
-        """Execute a single move to (wx, wy) with heading-aware control.
+        """Execute a single arc move toward (wx, wy).
 
-        If heading difference to waypoint is large (>30°), turn first
-        to face it, then drive forward. Otherwise, use arc (move_to)
-        for smooth motion.
+        Always uses arc (move_to) — no in-place rotation needed.
+        When heading is far off, shortens the move distance so the arc
+        is tighter and doesn't sweep through obstacles.
+        The receding horizon corrects heading over multiple iterations.
         """
-        TURN_THRESHOLD = 30  # degrees — above this, turn in place first
-
         self.state = "MOVING"
         self.message = "Calibrating gyro..."
         try:
             self.robot.imu.calibrate_gyro(samples=100)
 
-            # Compute heading difference to waypoint
+            # Check heading mismatch to decide move distance
             dx = wx - self.pose[0]
             dy = wy - self.pose[1]
             target_heading = math.degrees(math.atan2(dy, dx))
-            heading_diff = (target_heading - self.pose[2] + 180) % 360 - 180
-            dist = math.hypot(dx, dy)
+            heading_diff = abs((target_heading - self.pose[2] + 180) % 360 - 180)
 
-            self.robot.history = []
-
-            if abs(heading_diff) > TURN_THRESHOLD:
-                # Large heading mismatch — turn first, then drive straight
-                print(f"  ↻ turn({heading_diff:.0f}°) then forward({dist:.0f}cm)")
-                self.message = f"Turning {heading_diff:.0f}°..."
-                self.robot.turn(heading_diff)
-                self.message = f"Driving {dist:.0f}cm..."
-                self.robot.forward(dist)
+            # If heading is way off, move a shorter distance (tighter arc)
+            if heading_diff > 90:
+                frac = 0.3
+            elif heading_diff > 45:
+                frac = 0.5
             else:
-                # Small mismatch — arc handles it smoothly
+                frac = 1.0
+
+            if frac < 1.0:
+                # Shorten target: move fraction of the way
+                move_x = self.pose[0] + dx * frac
+                move_y = self.pose[1] + dy * frac
+                print(
+                    f"  → arc to ({move_x:.0f}, {move_y:.0f}), "
+                    f"Δθ={heading_diff:.0f}° (shortened to {frac * 100:.0f}%)"
+                )
+            else:
+                move_x, move_y = wx, wy
                 print(f"  → arc to ({wx:.0f}, {wy:.0f}), Δθ={heading_diff:.0f}°")
-                self.message = f"Moving to ({wx:.0f}, {wy:.0f})..."
-                self.robot.move_to(wx, wy)
+
+            self.message = f"Moving to ({move_x:.0f}, {move_y:.0f})..."
+            self.robot.history = []
+            self.robot.move_to(move_x, move_y)
 
             self.pose = self.robot.get_pose()
             self.path_history.append((self.pose[0], self.pose[1]))
