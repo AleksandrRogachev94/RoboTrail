@@ -36,6 +36,7 @@
   .s-idle { color: #4ecca3; }
   .s-moving { color: #f7b731; }
   .s-scanning { color: #45aaf2; }
+  .s-planning { color: #a55eea; }
   .s-error { color: #fc5c65; }
   #status .label { color: #888; }
   #status .val { color: #4ecca3; }
@@ -94,6 +95,7 @@ let pose = [0, 0, 0];
 let target = null;
 let state = 'IDLE';
 let path = [];          // [(x,y), ...] visited positions
+let planned = [];       // [(x,y), ...] planned waypoints
 let icpCorr = [];       // [{from, to}, ...] ICP corrections
 
 // ── Single unified poll ──────────────────────────────────────────
@@ -106,6 +108,7 @@ function poll() {
     pose = d.pose;
     target = d.target;
     path = d.path || [];
+    planned = d.planned || [];
     icpCorr = d.icp_corrections || [];
 
     // Update status bar
@@ -277,6 +280,25 @@ function draw() {
   ctx.imageSmoothingEnabled = false; // crisp pixels
   ctx.drawImage(offscreen, ox, oy, drawW, drawH);
 
+  // ── Traversability overlay (blue tint on drivable cells) ────
+  if (mapData.traversable) {
+    const travCanvas = new OffscreenCanvas(cols, rows);
+    const travCtx = travCanvas.getContext('2d');
+    const travImg = travCtx.createImageData(cols, rows);
+    const td = travImg.data;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const imgRow = rows - 1 - r;
+        const idx = (imgRow * cols + c) * 4;
+        if (mapData.traversable[r][c]) {
+          td[idx] = 52; td[idx+1] = 152; td[idx+2] = 219; td[idx+3] = 50;
+        }
+      }
+    }
+    travCtx.putImageData(travImg, 0, 0);
+    ctx.drawImage(travCanvas, ox, oy, drawW, drawH);
+  }
+
   // ── Grid lines + axis labels ─────────────────────────────────
   ctx.fillStyle = '#555';
   ctx.font = '11px monospace';
@@ -320,6 +342,31 @@ function draw() {
       const [px, py] = w2c(pt[0], pt[1]);
       ctx.beginPath();
       ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ── Planned path (cyan dashed) ──────────────────────────────
+  if (planned.length > 1) {
+    ctx.strokeStyle = 'rgba(165, 94, 234, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    const [pp0, pp1] = w2c(planned[0][0], planned[0][1]);
+    ctx.moveTo(pp0, pp1);
+    for (let i = 1; i < planned.length; i++) {
+      const [px, py] = w2c(planned[i][0], planned[i][1]);
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Dots at planned waypoints
+    ctx.fillStyle = 'rgba(165, 94, 234, 0.9)';
+    for (const pt of planned) {
+      const [px, py] = w2c(pt[0], pt[1]);
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
       ctx.fill();
     }
   }

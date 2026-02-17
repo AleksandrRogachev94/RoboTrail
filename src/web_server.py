@@ -32,6 +32,7 @@ def get_state():
             "map_version": slam.map_version,
             "icp": slam.icp_result,
             "path": slam.path_history,
+            "planned": slam.planned_waypoints,
             "icp_corrections": slam.icp_corrections,
             "pid": slam.pid_summary,
         }

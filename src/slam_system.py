@@ -17,6 +17,7 @@ import numpy as np
 
 from icp import icp
 from occupancy_grid import OccupancyGrid
+from path_planner import plan_and_smooth
 from robot.config import TOF_OFFSET_X, TOF_OFFSET_Y
 from robot.drive_dc import RobotDC
 from scanner import Scanner
@@ -36,6 +37,7 @@ class SlamSystem:
         self.path_history = [(0.0, 0.0)]  # list of (x, y) visited
         self.icp_corrections = []  # list of {"from": [x,y], "to": [x,y]}
         self.pid_summary = None  # last movement PID stats
+        self.planned_waypoints = []  # current planned path [(x,y), ...]
 
         # Hardware
         self.chip = None
@@ -75,6 +77,7 @@ class SlamSystem:
 
         Returns dict with:
           grid: 2D list of probabilities (0=free, 1=occupied)
+          traversable: 2D list of booleans (True=safe to drive)
           bounds: [x_min, x_max, y_min, y_max] in cm
           rows, cols: dimensions
         """
@@ -85,8 +88,16 @@ class SlamSystem:
         x_min, y_min = self.grid.grid_to_world(r0, c0)
         x_max, y_max = self.grid.grid_to_world(r1, c1)
 
+        # Traversability overlay
+        try:
+            trav = self.grid.get_traversability_grid()
+            trav_cropped = trav[r0 : r1 + 1, c0 : c1 + 1].tolist()
+        except Exception:
+            trav_cropped = None
+
         return {
             "grid": np.round(cropped, 2).tolist(),
+            "traversable": trav_cropped,
             "bounds": [x_min, x_max, y_min, y_max],
             "rows": cropped.shape[0],
             "cols": cropped.shape[1],
@@ -126,27 +137,80 @@ class SlamSystem:
             traceback.print_exc()
 
     def _move_scan_update(self, target):
-        """Move to target, then scan and update map."""
-        tx, ty = target
+        """Navigate to target using receding horizon path planning.
 
-        # 1. Move
+        At each step: plan path → move to first waypoint → scan → repeat.
+        Re-plans from current position every iteration to handle new obstacles.
+        """
+        tx, ty = target
+        ARRIVAL_THRESHOLD = 10.0  # cm — close enough to target
+        MAX_STEPS = 50  # safety limit
+
+        for step_i in range(MAX_STEPS):
+            # Check if we've arrived
+            dist_to_goal = math.hypot(tx - self.pose[0], ty - self.pose[1])
+            if dist_to_goal < ARRIVAL_THRESHOLD:
+                self.message = f"Arrived at ({tx:.0f}, {ty:.0f})!"
+                print(f"Arrived at target (dist={dist_to_goal:.1f}cm)")
+                break
+
+            # Plan path from current pose to target
+            self.state = "PLANNING"
+            self.message = f"Planning path to ({tx:.0f}, {ty:.0f})..."
+            start_xy = (self.pose[0], self.pose[1])
+            waypoints = plan_and_smooth(self.grid, start_xy, (tx, ty))
+
+            if waypoints is None or len(waypoints) < 2:
+                self.message = "No path found!"
+                print(
+                    f"No path to ({tx:.0f}, {ty:.0f}) from ({start_xy[0]:.0f}, {start_xy[1]:.0f})"
+                )
+                break
+
+            # Store full planned path for UI display
+            self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
+            print(
+                f"Step {step_i + 1}: planned {len(waypoints)} waypoints, moving to first"
+            )
+
+            # Move to first waypoint (index 1 — index 0 is current position)
+            wx, wy = waypoints[1]
+            self._move_one_step(wx, wy)
+
+            # Scan and update map
+            odom_pos = (self.pose[0], self.pose[1])
+            self._scan_and_update()
+
+            # Record ICP correction if it happened
+            corrected_pos = (self.pose[0], self.pose[1])
+            if self.icp_result and self.icp_result.get("status") == "converged":
+                self.path_history[-1] = corrected_pos
+                self.icp_corrections.append(
+                    {
+                        "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
+                        "to": [round(corrected_pos[0], 1), round(corrected_pos[1], 1)],
+                    }
+                )
+
+        self.planned_waypoints = []  # clear after navigation
+        self.state = "IDLE"
+        self.message = "Ready"
+
+    def _move_one_step(self, wx, wy):
+        """Execute a single move to (wx, wy) with gyro calibration and PID logging."""
         self.state = "MOVING"
         self.message = "Calibrating gyro..."
         try:
-            # ZUPT: re-zero gyro bias while stopped to combat heading drift
             self.robot.imu.calibrate_gyro(samples=100)
-
-            self.message = f"Moving to ({tx:.1f}, {ty:.1f})..."
-            print(f"Moving to ({tx:.1f}, {ty:.1f})...")
-            self.robot.history = []  # clear PID log
-            self.robot.move_to(tx, ty)
+            self.message = f"Moving to ({wx:.0f}, {wy:.0f})..."
+            print(f"  → move_to({wx:.0f}, {wy:.0f})")
+            self.robot.history = []
+            self.robot.move_to(wx, wy)
             self.pose = self.robot.get_pose()
             self.path_history.append((self.pose[0], self.pose[1]))
 
-            # Store PID history for charts
             if self.robot.history:
                 h = self.robot.history
-                # Downsample to max 100 points
                 step = max(1, len(h) // 100)
                 self.pid_summary = {
                     "t": [round(s["t"], 3) for s in h[::step]],
@@ -158,25 +222,7 @@ class SlamSystem:
             self.state = "ERROR"
             self.message = f"Move failed: {e}"
             traceback.print_exc()
-            return
-
-        # 2. Scan + update (ICP may correct pose)
-        odom_pos = (self.pose[0], self.pose[1])
-        self._scan_and_update()
-
-        # Record ICP correction if it happened
-        corrected_pos = (self.pose[0], self.pose[1])
-        if self.icp_result and self.icp_result.get("status") == "converged":
-            self.path_history[-1] = corrected_pos  # update to corrected
-            self.icp_corrections.append(
-                {
-                    "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
-                    "to": [round(corrected_pos[0], 1), round(corrected_pos[1], 1)],
-                }
-            )
-
-        self.state = "IDLE"
-        self.message = "Ready"
+            raise
 
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""

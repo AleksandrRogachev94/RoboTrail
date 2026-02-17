@@ -16,6 +16,7 @@ import math
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import binary_dilation
 
 from robot.config import (
     GRID_ORIGIN,
@@ -72,10 +73,11 @@ class OccupancyGrid:
 
     # ── Ray Tracing ────────────────────────────────────────────────────
 
-    def bresenham(self, r0: int, c0: int, r1: int, c1: int) -> list[tuple[int, int]]:
+    @staticmethod
+    def bresenham(r0: int, c0: int, r1: int, c1: int) -> list[tuple[int, int]]:
         dr, dc = abs(r1 - r0), abs(c1 - c0)
         sr = 1 if r1 > r0 else -1
-        sc = 1 if c1 > c0 else -1  # Fixed typo from your snippet
+        sc = 1 if c1 > c0 else -1
 
         line = []
         r, c = r0, c0
@@ -231,6 +233,49 @@ class OccupancyGrid:
             True if P(occupied) < threshold.
         """
         return self.get_probability(row, col) < threshold
+
+    # ── Traversability ─────────────────────────────────────────────────
+
+    def get_traversability_grid(
+        self, obstacle_inflation: int = 5, free_inflation: int = 3
+    ) -> np.ndarray:
+        """Build traversability mask with dual inflation.
+
+        The raw grid has sparse free cells (rays only mark cells they pass
+        through). This method fills gaps by:
+        1. Inflating FREE cells outward to bridge gaps between sparse rays
+        2. Inflating OCCUPIED cells outward for safety margin
+        3. Traversable = inflated_free AND NOT inflated_obstacle
+
+        Args:
+            obstacle_inflation: Cells to dilate obstacles by (~robot half-width).
+                                5 cells × 2cm = 10cm clearance.
+            free_inflation: Cells to dilate free space by (bridge ray gaps).
+                            3 cells × 2cm = 6cm gap filling.
+
+        Returns:
+            2D boolean array (same shape as grid). True = safe to traverse.
+
+        """
+        prob_map = self.get_probability_map()
+        free_mask = prob_map < 0.3
+        occ_mask = prob_map > 0.7
+
+        # Create disk structuring elements for each inflation radius
+        r = obstacle_inflation
+        y, x = np.ogrid[-r : r + 1, -r : r + 1]
+        occ_disk = (x * x + y * y) <= r * r
+
+        r = free_inflation
+        y, x = np.ogrid[-r : r + 1, -r : r + 1]
+        free_disk = (x * x + y * y) <= r * r
+
+        # Dilate both masks
+        inflated_free = binary_dilation(free_mask, structure=free_disk)
+        inflated_occ = binary_dilation(occ_mask, structure=occ_disk)
+
+        # 6. Return inflated_free & ~inflated_occ
+        return inflated_free & ~inflated_occ
 
     # ── Visualization ──────────────────────────────────────────────────
 
