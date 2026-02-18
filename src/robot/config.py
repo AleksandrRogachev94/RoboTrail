@@ -45,7 +45,7 @@ STEPS_PER_DEGREE = 62.0  # TODO: Calibrate with actual measurement
 # =============================================================================
 # DC Motor Movement Constants
 # =============================================================================
-TICKS_PER_CM = 62.5  # Calibrate with real measurement
+TICKS_PER_CM = 61.5  # Calibrate with real measurement
 DEFAULT_VELOCITY = 700  # ticks/sec
 DT = 0.02  # 50Hz control loop
 
