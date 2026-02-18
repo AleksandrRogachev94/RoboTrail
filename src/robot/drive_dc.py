@@ -185,6 +185,151 @@ class RobotDC:
             radius, arc_length = result
             self.arc(radius, arc_length)
 
+    def follow_path(
+        self,
+        waypoints: list[tuple[float, float]],
+        velocity: float = DEFAULT_VELOCITY,
+        look_ahead_cm: float = 25.0,
+        arrival_cm: float = 5.0,
+    ) -> None:
+        """Follow a path of world-coordinate waypoints using pure pursuit.
+
+        Computes the instantaneous curvature to the look-ahead point each tick
+        and derives wheel velocities from geometry (same math as arc()).
+        Both motors always move forward (inner wheel clamped to ≥ 0).
+
+        Args:
+            waypoints: List of (x, y) in world cm. First point should be
+                       near current position.
+            velocity: Base forward speed in ticks/sec.
+            look_ahead_cm: How far ahead on the path to aim.
+            arrival_cm: Stop when within this distance of final waypoint.
+        """
+        if len(waypoints) < 2:
+            return
+
+        final_x, final_y = waypoints[-1]
+
+        # Safety timeout based on path length
+        total_length = sum(
+            math.hypot(
+                waypoints[i][0] - waypoints[i - 1][0],
+                waypoints[i][1] - waypoints[i - 1][1],
+            )
+            for i in range(1, len(waypoints))
+        )
+        timeout = total_length / (velocity / TICKS_PER_CM) * 3
+
+        # Reset motors and heading PID (hybrid control like arc())
+        self.left.reset()
+        self.right.reset()
+        self.heading_pid.reset()
+
+        target_idx = 1
+        t = 0.0
+        last_time = monotonic()
+
+        while t < timeout:
+            # Stop when we've driven the full path length
+            avg_ticks = (abs(self.left.position) + abs(self.right.position)) / 2
+            driven_cm = avg_ticks / TICKS_PER_CM
+            if driven_cm >= total_length:
+                break
+
+            # Advance target index: skip waypoints we're already past
+            while target_idx < len(waypoints) - 1:
+                dx = waypoints[target_idx][0] - self.x
+                dy = waypoints[target_idx][1] - self.y
+                if math.hypot(dx, dy) > look_ahead_cm:
+                    break
+                target_idx += 1
+
+            # If we've passed all waypoints, stop
+            if target_idx >= len(waypoints) - 1:
+                # Aim at final waypoint
+                target_idx = len(waypoints) - 1
+                # Stop if close enough
+                dx = waypoints[target_idx][0] - self.x
+                dy = waypoints[target_idx][1] - self.y
+                if math.hypot(dx, dy) < arrival_cm:
+                    break
+
+            # Look-ahead point and expected heading
+            tx, ty = waypoints[target_idx]
+            dx = tx - self.x
+            dy = ty - self.y
+            expected_heading = math.degrees(math.atan2(dy, dx))
+
+            # Transform to robot-local frame for curvature
+            theta = math.radians(self._heading)
+            local_x = dx * math.cos(theta) + dy * math.sin(theta)
+            local_y = -dx * math.sin(theta) + dy * math.cos(theta)
+            L = math.hypot(local_x, local_y)
+
+            # Calculate actual dt
+            now = monotonic()
+            dt_actual = now - last_time
+            last_time = now
+
+            # Update heading from IMU
+            omega = self._update_heading(dt_actual)
+
+            # Heading PID correction (like arc() does)
+            heading_error = expected_heading - self._heading
+            heading_error = (heading_error + 180) % 360 - 180  # normalize
+            diff = self.heading_pid.update(heading_error, dt_actual)
+
+            # Compute base wheel velocities from curvature (feedforward)
+            if L < 0.5 or abs(local_y) < 0.3:
+                # Nearly straight — both wheels same speed
+                left_base = velocity
+                right_base = velocity
+            else:
+                # Curvature: κ = 2 * local_y / L²
+                curvature = 2.0 * local_y / (L * L)
+
+                # Clamp curvature to prevent extreme turns
+                max_curv = 2.0 / TRACK_WIDTH_CM
+                curvature = max(-max_curv, min(max_curv, curvature))
+
+                # Geometric wheel velocities
+                left_base = velocity * (1.0 - curvature * TRACK_WIDTH_CM / 2)
+                right_base = velocity * (1.0 + curvature * TRACK_WIDTH_CM / 2)
+
+                # Clamp: don't reverse inner wheel
+                left_base = max(0.0, left_base)
+                right_base = max(0.0, right_base)
+
+            # Apply heading PID correction on top of geometry (feedback)
+            left_vel, left_pwm = self.left.update(left_base - diff)
+            right_vel, right_pwm = self.right.update(right_base + diff)
+
+            # Update position
+            self._update_position(left_vel, right_vel, omega, dt_actual)
+
+            # Log data
+            self.history.append(
+                {
+                    "t": t,
+                    "left_vel": left_vel,
+                    "right_vel": right_vel,
+                    "left_pwm": left_pwm,
+                    "right_pwm": right_pwm,
+                    "heading": self._heading,
+                    "heading_error": heading_error,
+                    "heading_diff": diff,
+                }
+            )
+
+            t += dt_actual
+
+            # Sleep remainder of DT
+            elapsed = monotonic() - now
+            if elapsed < DT:
+                sleep(DT - elapsed)
+
+        self.stop()
+
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
         Drive forward by specified distance with heading correction.

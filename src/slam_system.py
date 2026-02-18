@@ -139,12 +139,13 @@ class SlamSystem:
     def _move_scan_update(self, target):
         """Navigate to target using receding horizon path planning.
 
-        At each step: plan path → move to first waypoint → scan → repeat.
+        At each step: plan path → follow first few waypoints → scan → repeat.
         Re-plans from current position every iteration to handle new obstacles.
         """
         tx, ty = target
         ARRIVAL_THRESHOLD = 10.0  # cm — close enough to target
         MAX_STEPS = 50  # safety limit
+        MAX_WPS_PER_MOVE = 3  # follow this many waypoints before scanning
 
         for step_i in range(MAX_STEPS):
             # Check if we've arrived
@@ -163,19 +164,48 @@ class SlamSystem:
             if waypoints is None or len(waypoints) < 2:
                 self.message = "No path found!"
                 print(
-                    f"No path to ({tx:.0f}, {ty:.0f}) from ({start_xy[0]:.0f}, {start_xy[1]:.0f})"
+                    f"No path to ({tx:.0f}, {ty:.0f}) from "
+                    f"({start_xy[0]:.0f}, {start_xy[1]:.0f})"
                 )
                 break
 
             # Store full planned path for UI display
             self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
+
+            # Follow a chunk of waypoints (include start position + next N)
+            chunk = waypoints[: MAX_WPS_PER_MOVE + 1]
             print(
-                f"Step {step_i + 1}: planned {len(waypoints)} waypoints, moving to first"
+                f"Step {step_i + 1}: planned {len(waypoints)} waypoints, "
+                f"following {len(chunk) - 1}"
             )
 
-            # Move to first waypoint (index 1 — index 0 is current position)
-            wx, wy = waypoints[1]
-            self._move_one_step(wx, wy)
+            # Execute movement along the path chunk
+            self.state = "MOVING"
+            self.message = "Calibrating gyro..."
+            try:
+                self.robot.imu.calibrate_gyro(samples=100)
+                self.message = f"Following path ({len(chunk) - 1} waypoints)..."
+                self.robot.history = []
+                self.robot.follow_path(chunk)
+                self.pose = self.robot.get_pose()
+                self.path_history.append((self.pose[0], self.pose[1]))
+
+                if self.robot.history:
+                    h = self.robot.history
+                    step = max(1, len(h) // 100)
+                    self.pid_summary = {
+                        "t": [round(s["t"], 3) for s in h[::step]],
+                        "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                        "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                        "heading_error": [
+                            round(s["heading_error"], 1) for s in h[::step]
+                        ],
+                    }
+            except Exception as e:
+                self.state = "ERROR"
+                self.message = f"Move failed: {e}"
+                traceback.print_exc()
+                break
 
             # Scan and update map
             odom_pos = (self.pose[0], self.pose[1])
@@ -188,74 +218,16 @@ class SlamSystem:
                 self.icp_corrections.append(
                     {
                         "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
-                        "to": [round(corrected_pos[0], 1), round(corrected_pos[1], 1)],
+                        "to": [
+                            round(corrected_pos[0], 1),
+                            round(corrected_pos[1], 1),
+                        ],
                     }
                 )
 
         self.planned_waypoints = []  # clear after navigation
         self.state = "IDLE"
         self.message = "Ready"
-
-    def _move_one_step(self, wx, wy):
-        """Execute a single arc move toward (wx, wy).
-
-        Always uses arc (move_to) — no in-place rotation needed.
-        When heading is far off, shortens the move distance so the arc
-        is tighter and doesn't sweep through obstacles.
-        The receding horizon corrects heading over multiple iterations.
-        """
-        self.state = "MOVING"
-        self.message = "Calibrating gyro..."
-        try:
-            self.robot.imu.calibrate_gyro(samples=100)
-
-            # Check heading mismatch to decide move distance
-            dx = wx - self.pose[0]
-            dy = wy - self.pose[1]
-            target_heading = math.degrees(math.atan2(dy, dx))
-            heading_diff = abs((target_heading - self.pose[2] + 180) % 360 - 180)
-
-            # If heading is way off, move a shorter distance (tighter arc)
-            if heading_diff > 90:
-                frac = 0.3
-            elif heading_diff > 45:
-                frac = 0.5
-            else:
-                frac = 1.0
-
-            if frac < 1.0:
-                # Shorten target: move fraction of the way
-                move_x = self.pose[0] + dx * frac
-                move_y = self.pose[1] + dy * frac
-                print(
-                    f"  → arc to ({move_x:.0f}, {move_y:.0f}), "
-                    f"Δθ={heading_diff:.0f}° (shortened to {frac * 100:.0f}%)"
-                )
-            else:
-                move_x, move_y = wx, wy
-                print(f"  → arc to ({wx:.0f}, {wy:.0f}), Δθ={heading_diff:.0f}°")
-
-            self.message = f"Moving to ({move_x:.0f}, {move_y:.0f})..."
-            self.robot.history = []
-            self.robot.move_to(move_x, move_y)
-
-            self.pose = self.robot.get_pose()
-            self.path_history.append((self.pose[0], self.pose[1]))
-
-            if self.robot.history:
-                h = self.robot.history
-                step = max(1, len(h) // 100)
-                self.pid_summary = {
-                    "t": [round(s["t"], 3) for s in h[::step]],
-                    "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
-                    "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
-                    "heading_error": [round(s["heading_error"], 1) for s in h[::step]],
-                }
-        except Exception as e:
-            self.state = "ERROR"
-            self.message = f"Move failed: {e}"
-            traceback.print_exc()
-            raise
 
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""
