@@ -176,6 +176,21 @@ class SlamSystem:
                 )
                 break
 
+            # On first step: check if path starts with a sharp turn → back up
+            if step_i == 0 and len(waypoints) >= 2:
+                wp1x, wp1y = waypoints[1]
+                angle_to_wp1 = math.degrees(
+                    math.atan2(wp1y - self.pose[1], wp1x - self.pose[0])
+                )
+                wp1_diff = abs((angle_to_wp1 - self.pose[2] + 180) % 360 - 180)
+                if wp1_diff > self.SHARP_TURN_DEG:
+                    print(
+                        f"Sharp first waypoint ({wp1_diff:.0f}°) — "
+                        f"backing up {self.BACKUP_CM}cm before path"
+                    )
+                    self._back_up(self.BACKUP_CM)
+                    continue  # re-plan from new position
+
             # Store full planned path for UI display
             self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
 
@@ -323,6 +338,7 @@ class SlamSystem:
     BOOTSTRAP_DRIVE_CM = 15.0  # Forward drive when map is too young for frontiers
     MIN_FRONTIER_DIST = 15.0  # Below this, drive forward instead of path-planning
     SHARP_TURN_DEG = 80.0  # Back up first if heading change exceeds this
+    STRONGLY_BEHIND_DEG = 150.0  # Turn in place first if goal is this far off heading
     BACKUP_CM = 20.0  # How far to back up before a sharp turn
 
     def explore(self):
@@ -391,13 +407,15 @@ class SlamSystem:
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
 
-        # Back up if sharp turn needed (creates room for arc)
+        # Back up if goal is nearly behind us — creates room for the arc
         angle = math.degrees(math.atan2(gy - self.pose[1], gx - self.pose[0]))
         heading_diff = abs((angle - self.pose[2] + 180) % 360 - 180)
-        if heading_diff > self.SHARP_TURN_DEG:
-            print(f"Sharp turn ({heading_diff:.0f}°) — backing up {self.BACKUP_CM}cm")
-            self._back_up(self.BACKUP_CM)
-
+        if heading_diff > self.STRONGLY_BEHIND_DEG:
+            backup = self.BACKUP_CM * 1.5  # extra room for near-180° arc
+            print(
+                f"Goal behind robot ({heading_diff:.0f}°) — backing up {backup:.0f}cm"
+            )
+            self._back_up(backup)
         self._move_scan_update(goal)
         self.explore_goal = None
 

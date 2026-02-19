@@ -155,7 +155,7 @@ def simplify_path(path: list[tuple], traversability: np.ndarray) -> list[tuple]:
 def smooth_path(
     path: list[tuple],
     weight_data: float = 0.2,
-    weight_smooth: float = 0.2,
+    weight_smooth: float = 0.4,
     tolerance: float = 0.001,
     max_iterations: int = 1000,
 ) -> list[tuple]:
@@ -344,7 +344,7 @@ def plan_and_smooth(
     return waypoints
 
 
-def _interpolate_path(path: list[tuple], max_spacing: float = 4.0) -> list[tuple]:
+def _interpolate_path(path: list[tuple], max_spacing: float = 2.0) -> list[tuple]:
     """Add intermediate points to simplified path segments.
 
     Ensures gradient descent has enough points to create smooth curves.
