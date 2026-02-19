@@ -15,7 +15,7 @@ import traceback
 import lgpio
 import numpy as np
 
-from frontier import cluster_frontiers, find_frontiers, pick_frontier
+from frontier import find_frontiers, get_frontier_viz_data, select_goal
 from icp import icp
 from occupancy_grid import OccupancyGrid, scan_to_world
 from path_planner import plan_and_smooth
@@ -38,8 +38,11 @@ class SlamSystem:
         self.icp_corrections = []  # list of {"from": [x,y], "to": [x,y]}
         self.pid_summary = None  # last movement PID stats
         self.planned_waypoints = []  # current planned path [(x,y), ...]
-        self.frontier_target = None  # (x, y) current exploration target
-        self.frontier_clusters = []  # [{centroid_xy, size}, ...] for UI
+
+        # Exploration state
+        self._exploring = False
+        self.explore_goal = None  # current (x, y) exploration target
+        self.frontier_data = []  # viz data for web UI
 
         # Hardware
         self.chip = None
@@ -113,69 +116,13 @@ class SlamSystem:
         self._init_hardware()
 
         while self._running:
-            if self.target:
+            if self._exploring:
+                self._explore_loop()
+            elif self.target:
                 target = self.target
                 self.target = None
                 self._move_scan_update(target)
             time.sleep(0.1)
-
-    def explore(self):
-        """Autonomous frontier-based exploration.
-
-        Repeatedly finds the best frontier (boundary between free and
-        unknown space), drives toward it, scans, and updates the map.
-        Stops when no reachable frontier is found for several rounds.
-        """
-        MAX_NO_FRONTIER = 3  # stop after this many consecutive failures
-        no_frontier_count = 0
-
-        self.message = "Starting exploration..."
-        print("=== Exploration started ===")
-
-        while self._running:
-            # Find and cluster frontiers
-            frontier_cells = find_frontiers(self.grid)
-            clusters = cluster_frontiers(frontier_cells, self.grid, min_size=3)
-            self.frontier_clusters = [
-                {"centroid_xy": c["centroid_xy"], "size": c["size"]} for c in clusters
-            ]
-
-            target = pick_frontier(clusters, self.pose, self.grid, offset_cm=20.0)
-
-            if target is None:
-                no_frontier_count += 1
-                print(f"No viable frontier ({no_frontier_count}/{MAX_NO_FRONTIER})")
-                if no_frontier_count >= MAX_NO_FRONTIER:
-                    self.message = "Exploration complete!"
-                    self.frontier_target = None
-                    print("=== Exploration complete ===")
-                    break
-                # Do a scan in place — might reveal new frontiers
-                self._scan_and_update()
-                continue
-
-            no_frontier_count = 0
-            self.frontier_target = (
-                round(target[0], 1),
-                round(target[1], 1),
-            )
-            self.message = (
-                f"Exploring frontier at "
-                f"({target[0]:.0f}, {target[1]:.0f}) "
-                f"[{len(clusters)} clusters]"
-            )
-            print(
-                f"Frontier target: ({target[0]:.0f}, {target[1]:.0f}), "
-                f"{len(clusters)} clusters, "
-                f"best size={clusters[0]['size']} cells"
-            )
-
-            self._move_scan_update(target)
-
-        self.frontier_target = None
-        self.frontier_clusters = []
-        self.state = "IDLE"
-        self.message = "Exploration complete!"
 
     def _init_hardware(self):
         """Initialize hardware, take initial scan."""
@@ -286,8 +233,9 @@ class SlamSystem:
                 )
 
         self.planned_waypoints = []  # clear after navigation
-        self.state = "IDLE"
-        self.message = "Ready"
+        if not self._exploring:
+            self.state = "IDLE"
+            self.message = "Ready"
 
     def _scan_and_update(self):
         """Scan, optionally ICP correct, update grid."""
@@ -368,3 +316,111 @@ class SlamSystem:
             self.state = "ERROR"
             self.message = f"Scan error: {e}"
             traceback.print_exc()
+
+    # ── Exploration ─────────────────────────────────────────────────
+
+    def explore(self):
+        """Start autonomous frontier exploration."""
+        if self.state != "IDLE":
+            return False
+        self._exploring = True
+        self.message = "Starting exploration..."
+        return True
+
+    def stop_explore(self):
+        """Stop autonomous exploration after current move."""
+        self._exploring = False
+        self.explore_goal = None
+        self.frontier_data = []
+        self.message = "Exploration stopped"
+
+    def _explore_loop(self):
+        """One iteration of the exploration loop.
+
+        Called repeatedly by _loop() while self._exploring is True.
+        Each call: detect frontiers → select goal → navigate → scan.
+        """
+        MIN_DRIVE_CM = 15.0
+
+        # Detect frontiers
+        self.state = "EXPLORING"
+        self.message = "Detecting frontiers..."
+        clusters = find_frontiers(self.grid)
+        self.frontier_data = get_frontier_viz_data(self.grid, clusters)
+
+        if not clusters:
+            self._exploring = False
+            self.explore_goal = None
+            self.state = "IDLE"
+            self.message = "Exploration complete — no frontiers remain!"
+            print("Exploration complete: no frontiers found.")
+            return
+
+        print(
+            f"Found {len(clusters)} frontier clusters "
+            f"(sizes: {[len(c) for c in clusters[:5]]})"
+        )
+
+        # Select goal
+        goal = select_goal(self.grid, clusters, self.pose)
+
+        if goal is None:
+            self._exploring = False
+            self.explore_goal = None
+            self.state = "IDLE"
+            self.message = "No reachable frontiers — exploration stopped."
+            print("No reachable frontiers.")
+            return
+
+        gx, gy = goal
+        dist_to_goal = math.hypot(gx - self.pose[0], gy - self.pose[1])
+        print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist_to_goal:.0f}cm")
+
+        if dist_to_goal < MIN_DRIVE_CM:
+            # Frontier is very close — drive forward to get initial coverage
+            self.message = f"Frontier nearby — driving forward {MIN_DRIVE_CM:.0f}cm"
+            self.explore_goal = None
+            print(f"Frontier too close ({dist_to_goal:.0f}cm), driving forward")
+
+            # Safety check: is there a wall straight ahead?
+            heading_rad = math.radians(self.pose[2])
+            check_x = self.pose[0] + MIN_DRIVE_CM * math.cos(heading_rad)
+            check_y = self.pose[1] + MIN_DRIVE_CM * math.sin(heading_rad)
+            check_rc = self.grid.world_to_grid(check_x, check_y)
+            traversable = self.grid.get_traversability_grid()
+            cr, cc = check_rc
+            if (
+                0 <= cr < traversable.shape[0]
+                and 0 <= cc < traversable.shape[1]
+                and not traversable[cr, cc]
+            ):
+                # Wall ahead — pick a different direction or skip
+                print("Wall ahead! Skipping forward drive.")
+                self.message = "Wall ahead — re-evaluating..."
+                self._scan_and_update()
+                return
+
+            try:
+                self.state = "MOVING"
+                self.robot.imu.calibrate_gyro(samples=100)
+                self.robot.history = []
+                self.robot.forward(MIN_DRIVE_CM)
+                self.pose = self.robot.get_pose()
+                self.path_history.append((self.pose[0], self.pose[1]))
+            except Exception as e:
+                self.state = "ERROR"
+                self.message = f"Move failed: {e}"
+                traceback.print_exc()
+                self._exploring = False
+                return
+
+            self._scan_and_update()
+            return
+
+        # Navigate to the selected goal using receding-horizon planner
+        self.explore_goal = goal
+        self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
+        self._move_scan_update(goal)
+
+        # After arriving, update frontiers for next iteration
+        self.explore_goal = None

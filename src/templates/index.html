@@ -37,6 +37,7 @@
   .s-moving { color: #f7b731; }
   .s-scanning { color: #45aaf2; }
   .s-planning { color: #a55eea; }
+  .s-exploring { color: #ff6b81; }
   .s-error { color: #fc5c65; }
   #status .label { color: #888; }
   #status .val { color: #4ecca3; }
@@ -57,6 +58,24 @@
     color: #555;
     margin-top: 10px;
     font-style: italic;
+  }
+  #explore-btn {
+    margin-top: 8px;
+    padding: 8px 24px;
+    border: 1px solid rgba(255,107,129,0.4);
+    background: rgba(255,107,129,0.12);
+    color: #ff6b81;
+    border-radius: 6px;
+    font-family: 'SF Mono', monospace;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #explore-btn:hover { background: rgba(255,107,129,0.25); }
+  #explore-btn.active {
+    border-color: rgba(252,92,101,0.6);
+    background: rgba(252,92,101,0.2);
+    color: #fc5c65;
   }
 </style>
 </head>
@@ -79,10 +98,8 @@
 <div class="canvas-wrap">
   <canvas id="c" width="720" height="720"></canvas>
 </div>
-<div id="hint">click on map to move robot · or explore automatically</div>
-<div style="margin-top:8px">
-  <button id="explore-btn" onclick="startExplore()" style="background:#4ecca3;color:#0f0f1a;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:0.9em">🔍 Explore</button>
-</div>
+<div id="hint">click on map to move robot</div>
+<button id="explore-btn" onclick="toggleExplore()">🔍 Explore</button>
 <div style="margin-top:12px;width:720px">
   <canvas id="pid-chart" height="150" style="background:#12121f;border-radius:4px"></canvas>
 </div>
@@ -100,8 +117,9 @@ let state = 'IDLE';
 let path = [];          // [(x,y), ...] visited positions
 let planned = [];       // [(x,y), ...] planned waypoints
 let icpCorr = [];       // [{from, to}, ...] ICP corrections
-let frontierTarget = null;  // {x, y} current exploration target
-let frontierClusters = [];  // [{x, y, size}, ...] cluster centroids
+let frontiers = [];     // [{centroid, size, cells}, ...]
+let exploreGoal = null; // [x, y] current explore target
+let exploring = false;  // whether in explore mode
 
 // ── Single unified poll ──────────────────────────────────────────
 
@@ -115,8 +133,19 @@ function poll() {
     path = d.path || [];
     planned = d.planned || [];
     icpCorr = d.icp_corrections || [];
-    frontierTarget = d.frontier_target || null;
-    frontierClusters = d.frontier_clusters || [];
+    frontiers = d.frontiers || [];
+    exploreGoal = d.explore_goal;
+    exploring = d.exploring || false;
+
+    // Update explore button state
+    const btn = document.getElementById('explore-btn');
+    if (exploring) {
+      btn.textContent = '⏹ Stop Exploring';
+      btn.classList.add('active');
+    } else {
+      btn.textContent = '🔍 Explore';
+      btn.classList.remove('active');
+    }
 
     // Update status bar
     const stEl = document.getElementById('st');
@@ -434,37 +463,38 @@ function draw() {
     ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI*2); ctx.stroke();
   }
 
-  // ── Frontier clusters (orange diamonds) ─────────────────────
-  for (const c of frontierClusters) {
-    const [cx, cy] = w2c(c.x, c.y);
-    const r = Math.min(3 + c.size * 0.3, 8);
-    ctx.fillStyle = 'rgba(255, 165, 0, 0.5)';
-    ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
-    ctx.lineWidth = 1;
+  // ── Frontier clusters (orange dots) ───────────────────────────
+  for (const f of frontiers) {
+    // Draw frontier cells as small dots
+    ctx.fillStyle = 'rgba(255, 165, 0, 0.4)';
+    for (const cell of f.cells) {
+      const [fx, fy] = w2c(cell[0], cell[1]);
+      ctx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
+    }
+    // Centroid marker
+    const [cx, cy] = w2c(f.centroid[0], f.centroid[1]);
+    ctx.fillStyle = '#ff9f43';
     ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.lineTo(cx + r, cy);
-    ctx.lineTo(cx, cy + r);
-    ctx.lineTo(cx - r, cy);
-    ctx.closePath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
     ctx.stroke();
+    // Size label
+    ctx.fillStyle = '#ff9f43';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(f.size, cx + 7, cy + 3);
   }
 
-  // ── Frontier target (green pulsing diamond) ─────────────────
-  if (frontierTarget) {
-    const [fx, fy] = w2c(frontierTarget[0], frontierTarget[1]);
-    ctx.fillStyle = 'rgba(78, 204, 163, 0.6)';
-    ctx.strokeStyle = '#4ecca3';
+  // ── Explore goal (orange crosshair) ──────────────────────────
+  if (exploreGoal) {
+    const [ex, ey] = w2c(exploreGoal[0], exploreGoal[1]);
+    ctx.strokeStyle = '#ff6b81';
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(fx, fy - 8);
-    ctx.lineTo(fx + 8, fy);
-    ctx.lineTo(fx, fy + 8);
-    ctx.lineTo(fx - 8, fy);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ex-10, ey); ctx.lineTo(ex+10, ey); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ex, ey-10); ctx.lineTo(ex, ey+10); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI*2); ctx.stroke();
   }
 }
 
@@ -478,14 +508,15 @@ function w2c(wx, wy) {
   ];
 }
 
-// Initial
 draw();
 poll();
 
-function startExplore() {
-  if (state !== 'IDLE') return;
-  if (!confirm('Start autonomous exploration?')) return;
-  fetch('/api/explore', {method: 'POST'});
+function toggleExplore() {
+  if (exploring) {
+    fetch('/api/explore/stop', { method: 'POST' });
+  } else {
+    fetch('/api/explore', { method: 'POST' });
+  }
 }
 
 // ── PID Chart (Chart.js) ───────────────────────────────────────────
