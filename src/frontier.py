@@ -116,7 +116,7 @@ def select_goal(
     # Ensure start is traversable (robot is physically here)
     sr, sc = start_rc
     rows, cols = traversable.shape
-    CLEAR_R = 5
+    CLEAR_R = 6
     r_lo, r_hi = max(0, sr - CLEAR_R), min(rows, sr + CLEAR_R + 1)
     c_lo, c_hi = max(0, sc - CLEAR_R), min(cols, sc + CLEAR_R + 1)
     traversable[r_lo:r_hi, c_lo:c_hi] = True

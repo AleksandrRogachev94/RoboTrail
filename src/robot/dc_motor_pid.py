@@ -53,7 +53,7 @@ class DCMotorPID:
         self._last_time = time.monotonic()
         self._velocity = 0.0  # EMA-smoothed velocity
         self._raw_velocity = 0.0
-        self._EMA_ALPHA = 0.3  # smoothing factor (lower = smoother but slower response)
+        self._EMA_ALPHA = 0.2  # smoothing factor (lower = smoother but slower response)
 
     def _feedforward(self, target_velocity: float) -> float:
         """Estimate PWM needed for target velocity."""

@@ -144,7 +144,7 @@ def plot_frontiers(grid, clusters, goal, robot_pose, save_path="test_frontier.pn
             # Ensure start is traversable for the test (simulating being safe)
             sr, sc = start_rc
             rows, cols = traversable.shape
-            CLEAR_RADIUS = 5
+            CLEAR_RADIUS = 6
             r_lo = max(0, sr - CLEAR_RADIUS)
             r_hi = min(rows, sr + CLEAR_RADIUS + 1)
             c_lo = max(0, sc - CLEAR_RADIUS)

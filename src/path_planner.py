@@ -290,7 +290,7 @@ def plan_and_smooth(
     start_xy: tuple,
     goal_xy: tuple,
     robot_radius_cm: float = 9.0,
-    obstacle_inflation: int = 6,
+    obstacle_inflation: int = 7,
     free_inflation: int = 4,
 ) -> list[tuple] | None:
     """Full path planning pipeline: A* → simplify → smooth → sample.
@@ -317,7 +317,7 @@ def plan_and_smooth(
     # but ICP correction may have placed it inside an inflation zone)
     sr, sc = start_rc
     rows, cols = traversable.shape
-    CLEAR_RADIUS = 5  # cells (~10cm) — enough to bridge inflation gap
+    CLEAR_RADIUS = 6  # cells (~16cm) — enough to bridge inflation gap
     r_lo = max(0, sr - CLEAR_RADIUS)
     r_hi = min(rows, sr + CLEAR_RADIUS + 1)
     c_lo = max(0, sc - CLEAR_RADIUS)
