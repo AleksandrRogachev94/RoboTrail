@@ -361,7 +361,7 @@ class SlamSystem:
         self.state = "EXPLORING"
         self.message = "Detecting frontiers..."
         clusters = find_frontiers(self.grid)
-        self.frontier_data = get_frontier_viz_data(self.grid, clusters)
+        self.frontier_data = get_frontier_viz_data(self.grid, clusters, self.pose)
 
         # No frontiers found
         if not clusters:

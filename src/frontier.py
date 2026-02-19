@@ -24,7 +24,7 @@ from robot.config import GRID_RESOLUTION
 # ── Constants ──────────────────────────────────────────────────────────
 
 MIN_CLUSTER_SIZE = 30  # Filter small interior holes; real frontiers are 100+ cells
-STANDOFF_CM = 25.0  # Pull goal back from frontier centroid (arc room)
+STANDOFF_CM = 15.0  # Pull goal back from frontier edge (arc room)
 HEADING_PENALTY_WEIGHT = 0.8  # cm per degree — strongly prefer forward-facing goals
 
 # 8-connected neighbors for adjacency checks and BFS
@@ -125,10 +125,15 @@ def select_goal(
     best_score = float("inf")
 
     for cluster in clusters:
-        # Centroid in world coords
-        cr = sum(r for r, c in cluster) / len(cluster)
-        cc = sum(c for r, c in cluster) / len(cluster)
-        cx, cy = grid.grid_to_world(cr, cc)
+        # Find the point in the cluster closest to the robot
+        cx, cy = None, None
+        min_cluster_dist = float("inf")
+        for r, c in cluster:
+            wx, wy = grid.grid_to_world(r, c)
+            d = math.hypot(wx - rx, wy - ry)
+            if d < min_cluster_dist:
+                min_cluster_dist = d
+                cx, cy = wx, wy
 
         # Pull goal toward robot by STANDOFF_CM
         dx, dy = cx - rx, cy - ry
@@ -146,8 +151,8 @@ def select_goal(
         goal_rc = grid.world_to_grid(gx, gy)
         gr, gc = goal_rc
         if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
-            # Fall back to centroid
-            goal_rc = (int(round(cr)), int(round(cc)))
+            # Fall back to the edge point if standoff point is blocked
+            goal_rc = grid.world_to_grid(cx, cy)
             gr, gc = goal_rc
             if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
                 continue
@@ -174,26 +179,33 @@ def select_goal(
 
 
 def get_frontier_viz_data(
-    grid: OccupancyGrid, clusters: list[list[tuple[int, int]]]
+    grid: OccupancyGrid,
+    clusters: list[list[tuple[int, int]]],
+    robot_pose: tuple[float, float, float],
 ) -> list[dict]:
     """Return frontier data formatted for the web UI.
 
-    Each entry has centroid, size, and cell positions for overlay rendering.
+    Each entry has edge_pt (closest cell to robot), size, and cell positions.
     """
+    rx, ry, _ = robot_pose
     result = []
     for cluster in clusters:
-        cr = sum(r for r, c in cluster) / len(cluster)
-        cc = sum(c for r, c in cluster) / len(cluster)
-        cx, cy = grid.grid_to_world(cr, cc)
-
+        # Find closest point to robot
+        cx, cy = None, None
+        min_dist = float("inf")
         cells = []
         for r, c in cluster:
             wx, wy = grid.grid_to_world(r, c)
             cells.append([float(round(wx, 1)), float(round(wy, 1))])
 
+            d = math.hypot(wx - rx, wy - ry)
+            if d < min_dist:
+                min_dist = d
+                cx, cy = wx, wy
+
         result.append(
             {
-                "centroid": [float(round(cx, 1)), float(round(cy, 1))],
+                "edge_pt": [float(round(cx, 1)), float(round(cy, 1))],
                 "size": len(cluster),
                 "cells": cells,
             }

@@ -610,7 +610,7 @@ function draw() {
       const [fx, fy] = w2c(cell[0], cell[1]);
       ctx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
     }
-    const [cx, cy] = w2c(f.centroid[0], f.centroid[1]);
+    const [cx, cy] = w2c(f.edge_pt[0], f.edge_pt[1]);
     ctx.fillStyle = '#fd79a8';
     ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1; ctx.stroke();
