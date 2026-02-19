@@ -253,7 +253,7 @@ class OccupancyGrid:
     # ── Traversability ─────────────────────────────────────────────────
 
     def get_traversability_grid(
-        self, obstacle_inflation: int = 5, free_inflation: int = 3
+        self, obstacle_inflation: int = 7, free_inflation: int = 5
     ) -> np.ndarray:
         """Build traversability mask with dual inflation.
 

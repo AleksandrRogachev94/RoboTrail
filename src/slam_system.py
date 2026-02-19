@@ -319,6 +319,12 @@ class SlamSystem:
 
     # ── Exploration ─────────────────────────────────────────────────
 
+    # Constants for explore loop
+    BOOTSTRAP_DRIVE_CM = 15.0  # Forward drive when map is too young for frontiers
+    MIN_FRONTIER_DIST = 15.0  # Below this, drive forward instead of path-planning
+    SHARP_TURN_DEG = 80.0  # Back up first if heading change exceeds this
+    BACKUP_CM = 20.0  # How far to back up before a sharp turn
+
     def explore(self):
         """Start autonomous frontier exploration."""
         if self.state != "IDLE":
@@ -335,20 +341,19 @@ class SlamSystem:
         self.message = "Exploration stopped"
 
     def _explore_loop(self):
-        """One iteration of the exploration loop.
-
-        Called repeatedly by _loop() while self._exploring is True.
-        Each call: detect frontiers → select goal → navigate → scan.
-        """
-        MIN_DRIVE_CM = 15.0
-
-        # Detect frontiers
+        """One iteration: detect frontiers → select goal → navigate → scan."""
         self.state = "EXPLORING"
         self.message = "Detecting frontiers..."
         clusters = find_frontiers(self.grid)
         self.frontier_data = get_frontier_viz_data(self.grid, clusters)
 
+        # No frontiers found
         if not clusters:
+            if self.map_version <= 2:
+                # Early map — drive forward to bootstrap coverage
+                print("No frontiers yet (early map) — driving forward")
+                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
+                return
             self._exploring = False
             self.explore_goal = None
             self.state = "IDLE"
@@ -361,9 +366,8 @@ class SlamSystem:
             f"(sizes: {[len(c) for c in clusters[:5]]})"
         )
 
-        # Select goal
+        # Select best reachable goal
         goal = select_goal(self.grid, clusters, self.pose)
-
         if goal is None:
             self._exploring = False
             self.explore_goal = None
@@ -373,54 +377,69 @@ class SlamSystem:
             return
 
         gx, gy = goal
-        dist_to_goal = math.hypot(gx - self.pose[0], gy - self.pose[1])
-        print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist_to_goal:.0f}cm")
+        dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
+        print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
-        if dist_to_goal < MIN_DRIVE_CM:
-            # Frontier is very close — drive forward to get initial coverage
-            self.message = f"Frontier nearby — driving forward {MIN_DRIVE_CM:.0f}cm"
+        # Very close frontier — just drive forward
+        if dist < self.MIN_FRONTIER_DIST:
             self.explore_goal = None
-            print(f"Frontier too close ({dist_to_goal:.0f}cm), driving forward")
+            print(f"Frontier too close ({dist:.0f}cm), driving forward")
+            self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
+            return
 
-            # Safety check: is there a wall straight ahead?
-            heading_rad = math.radians(self.pose[2])
-            check_x = self.pose[0] + MIN_DRIVE_CM * math.cos(heading_rad)
-            check_y = self.pose[1] + MIN_DRIVE_CM * math.sin(heading_rad)
-            check_rc = self.grid.world_to_grid(check_x, check_y)
-            traversable = self.grid.get_traversability_grid()
-            cr, cc = check_rc
-            if (
-                0 <= cr < traversable.shape[0]
-                and 0 <= cc < traversable.shape[1]
-                and not traversable[cr, cc]
-            ):
-                # Wall ahead — pick a different direction or skip
-                print("Wall ahead! Skipping forward drive.")
-                self.message = "Wall ahead — re-evaluating..."
-                self._scan_and_update()
-                return
+        # Navigate to goal
+        self.explore_goal = goal
+        self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
 
-            try:
-                self.state = "MOVING"
-                self.robot.imu.calibrate_gyro(samples=100)
-                self.robot.history = []
-                self.robot.forward(MIN_DRIVE_CM)
-                self.pose = self.robot.get_pose()
-                self.path_history.append((self.pose[0], self.pose[1]))
-            except Exception as e:
-                self.state = "ERROR"
-                self.message = f"Move failed: {e}"
-                traceback.print_exc()
-                self._exploring = False
-                return
+        # Back up if sharp turn needed (creates room for arc)
+        angle = math.degrees(math.atan2(gy - self.pose[1], gx - self.pose[0]))
+        heading_diff = abs((angle - self.pose[2] + 180) % 360 - 180)
+        if heading_diff > self.SHARP_TURN_DEG:
+            print(f"Sharp turn ({heading_diff:.0f}°) — backing up {self.BACKUP_CM}cm")
+            self._back_up(self.BACKUP_CM)
 
+        self._move_scan_update(goal)
+        self.explore_goal = None
+
+    def _drive_forward_safely(self, distance_cm: float):
+        """Drive forward (with wall check) then scan."""
+        heading_rad = math.radians(self.pose[2])
+        check_x = self.pose[0] + distance_cm * math.cos(heading_rad)
+        check_y = self.pose[1] + distance_cm * math.sin(heading_rad)
+        cr, cc = self.grid.world_to_grid(check_x, check_y)
+        traversable = self.grid.get_traversability_grid()
+        if (
+            0 <= cr < traversable.shape[0]
+            and 0 <= cc < traversable.shape[1]
+            and not traversable[cr, cc]
+        ):
+            print("Wall ahead — skipping forward drive")
             self._scan_and_update()
             return
 
-        # Navigate to the selected goal using receding-horizon planner
-        self.explore_goal = goal
-        self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
-        self._move_scan_update(goal)
+        try:
+            self.state = "MOVING"
+            self.robot.imu.calibrate_gyro(samples=100)
+            self.robot.history = []
+            self.robot.forward(distance_cm)
+            self.pose = self.robot.get_pose()
+            self.path_history.append((self.pose[0], self.pose[1]))
+        except Exception as e:
+            self.state = "ERROR"
+            self.message = f"Move failed: {e}"
+            traceback.print_exc()
+            self._exploring = False
+            return
+        self._scan_and_update()
 
-        # After arriving, update frontiers for next iteration
-        self.explore_goal = None
+    def _back_up(self, distance_cm: float):
+        """Back up to create room for a sharp turn."""
+        try:
+            self.state = "MOVING"
+            self.robot.imu.calibrate_gyro(samples=100)
+            self.robot.history = []
+            self.robot.forward(-distance_cm)
+            self.pose = self.robot.get_pose()
+            self.path_history.append((self.pose[0], self.pose[1]))
+        except Exception as e:
+            print(f"Backup failed: {e}")
