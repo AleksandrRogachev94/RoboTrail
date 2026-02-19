@@ -96,11 +96,11 @@
   PID: <span id="pid">waiting for movement...</span>
 </div>
 <div class="canvas-wrap">
-  <canvas id="c" width="720" height="720"></canvas>
+  <canvas id="c" width="800" height="800"></canvas>
 </div>
 <div id="hint">click on map to move robot</div>
 <button id="explore-btn" onclick="toggleExplore()">🔍 Explore</button>
-<div style="margin-top:12px;width:720px">
+<div style="margin-top:12px;width:800px">
   <canvas id="pid-chart" height="150" style="background:#12121f;border-radius:4px"></canvas>
 </div>
 
@@ -466,14 +466,14 @@ function draw() {
   // ── Frontier clusters (orange dots) ───────────────────────────
   for (const f of frontiers) {
     // Draw frontier cells as small dots
-    ctx.fillStyle = 'rgba(255, 165, 0, 0.4)';
+    ctx.fillStyle = 'rgba(46, 204, 113, 0.5)';
     for (const cell of f.cells) {
       const [fx, fy] = w2c(cell[0], cell[1]);
       ctx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
     }
     // Centroid marker
     const [cx, cy] = w2c(f.centroid[0], f.centroid[1]);
-    ctx.fillStyle = '#ff9f43';
+    ctx.fillStyle = '#2ecc71';
     ctx.beginPath();
     ctx.arc(cx, cy, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -481,7 +481,7 @@ function draw() {
     ctx.lineWidth = 1;
     ctx.stroke();
     // Size label
-    ctx.fillStyle = '#ff9f43';
+    ctx.fillStyle = '#2ecc71';
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(f.size, cx + 7, cy + 3);
