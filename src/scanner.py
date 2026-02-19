@@ -16,7 +16,7 @@ class Scanner:
         self,
         num_points=40,
         timing_budget=100,
-        settle_delay=0.01,
+        settle_delay=0.03,
         distance_mode=2,
         servo_reversed=True,
     ):
@@ -44,29 +44,38 @@ class Scanner:
         Returns:
             numpy array of shape (N, 2) with x, y coordinates in cm
         """
+        # Pre-position servo and wait for it to fully settle.
+        # The servo may need to travel up to 180° from the end of
+        # the previous scan; at ~60°/60ms that takes ~300ms.
         self.servo.set_angle(from_angle)
-        self.vl53.start_ranging()
+        self.vl53.stop_ranging()
         time.sleep(0.5)
+        # Clear any stale data_ready flag left over from the previous scan's
+        # stop_ranging(). Without this, i=0's start_ranging() sees data_ready=True
+        # immediately and reads the old distance from the previous servo position.
+        self.vl53.clear_interrupt()
 
-        angles = np.linspace(from_angle, to_angle, num=self.num_points)
+        angle_step = (to_angle - from_angle) / (self.num_points - 1)
         distances = []
+        angles = []
 
-        for angle in angles:
+        for i in range(self.num_points):
+            angle = from_angle + i * angle_step
+            angles.append(angle)
             self.servo.set_angle(angle)
-            time.sleep(self.settle_delay)
+            time.sleep(
+                self.settle_delay
+            )  # settle after each small step (~4.6° at 40 pts)
 
-            # Discard stale reading (captured during servo motion)
+            # Start fresh ranging -> wait for data -> read -> stop
+            # This avoids waiting for a "stale" reading to complete
+            self.vl53.start_ranging()
             while not self.vl53.data_ready:
                 time.sleep(0.001)
-            self.vl53.clear_interrupt()
 
-            # Capture fresh reading (started after servo settled)
-            while not self.vl53.data_ready:
-                time.sleep(0.001)
             distances.append(self.vl53.distance)
             self.vl53.clear_interrupt()
-
-        self.vl53.stop_ranging()
+            self.vl53.stop_ranging()
 
         cartesian = []
         for i, angle in enumerate(angles):
