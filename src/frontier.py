@@ -23,7 +23,7 @@ from robot.config import GRID_RESOLUTION
 
 # ── Constants ──────────────────────────────────────────────────────────
 
-MIN_CLUSTER_SIZE = 40  # Filter small interior holes; real frontiers are 100+ cells
+MIN_CLUSTER_SIZE = 30  # Filter small interior holes; real frontiers are 100+ cells
 STANDOFF_CM = 25.0  # Pull goal back from frontier centroid (arc room)
 HEADING_PENALTY_WEIGHT = 0.8  # cm per degree — strongly prefer forward-facing goals
 

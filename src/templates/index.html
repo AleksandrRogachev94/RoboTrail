@@ -77,6 +77,20 @@
     background: rgba(252,92,101,0.2);
     color: #fc5c65;
   }
+  #legend {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    pointer-events: none;
+    color: #ccc;
+    font-family: sans-serif;
+  }
+  .leg-item { display: flex; align-items: center; margin-top: 2px; }
+  .leg-box { width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; }
 </style>
 </head>
 <body>
@@ -97,6 +111,13 @@
 </div>
 <div class="canvas-wrap">
   <canvas id="c" width="800" height="800"></canvas>
+  <div id="legend">
+    <div class="leg-item"><div class="leg-box" style="background:#e74c3c"></div>Robot</div>
+    <div class="leg-item"><div class="leg-box" style="background:rgba(255, 200, 80, 0.9)"></div>Path</div>
+    <div class="leg-item"><div class="leg-box" style="background:#fd79a8"></div>Frontier</div>
+    <div class="leg-item"><div class="leg-box" style="background:#a55eea"></div>Planned</div>
+    <div class="leg-item"><div class="leg-box" style="background:rgba(52, 152, 219, 0.4)"></div>Traversable</div>
+  </div>
 </div>
 <div id="hint">click on map to move robot</div>
 <button id="explore-btn" onclick="toggleExplore()">🔍 Explore</button>
@@ -466,14 +487,14 @@ function draw() {
   // ── Frontier clusters (orange dots) ───────────────────────────
   for (const f of frontiers) {
     // Draw frontier cells as small dots
-    ctx.fillStyle = 'rgba(46, 204, 113, 0.5)';
+    ctx.fillStyle = 'rgba(253, 121, 168, 0.5)';
     for (const cell of f.cells) {
       const [fx, fy] = w2c(cell[0], cell[1]);
       ctx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
     }
     // Centroid marker
     const [cx, cy] = w2c(f.centroid[0], f.centroid[1]);
-    ctx.fillStyle = '#2ecc71';
+    ctx.fillStyle = '#fd79a8';
     ctx.beginPath();
     ctx.arc(cx, cy, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -481,7 +502,7 @@ function draw() {
     ctx.lineWidth = 1;
     ctx.stroke();
     // Size label
-    ctx.fillStyle = '#2ecc71';
+    ctx.fillStyle = '#fd79a8';
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(f.size, cx + 7, cy + 3);
