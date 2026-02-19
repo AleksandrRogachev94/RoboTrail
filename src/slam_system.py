@@ -396,6 +396,13 @@ class SlamSystem:
         # Select best reachable goal
         goal = select_goal(self.grid, clusters, self.pose)
         if goal is None:
+            if self.map_version <= 2:
+                print(
+                    "No reachable frontiers (early map) — driving forward to bootstrap"
+                )
+                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
+                return
+
             self._exploring = False
             self.explore_goal = None
             self.state = "IDLE"
