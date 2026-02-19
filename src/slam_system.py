@@ -352,7 +352,7 @@ class SlamSystem:
 
     def explore(self):
         """Start autonomous frontier exploration."""
-        if self.state != "IDLE":
+        if self._exploring or self.state != "IDLE":
             return False
         self._exploring = True
         self.message = "Starting exploration..."
@@ -363,6 +363,8 @@ class SlamSystem:
         self._exploring = False
         self.explore_goal = None
         self.frontier_data = []
+        self.robot.stop()  # Immediately halt any physical movement
+        self.state = "IDLE"
         self.message = "Exploration stopped"
 
     def _explore_loop(self):
@@ -404,13 +406,6 @@ class SlamSystem:
         gx, gy = goal
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
-
-        # Very close frontier — just drive forward
-        if dist < self.MIN_FRONTIER_DIST:
-            self.explore_goal = None
-            print(f"Frontier too close ({dist:.0f}cm), driving forward")
-            self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
-            return
 
         # Navigate to goal
         self.explore_goal = goal
