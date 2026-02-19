@@ -194,13 +194,12 @@ class RobotDC:
     ) -> None:
         """Follow a path of world-coordinate waypoints using pure pursuit.
 
-        Computes the instantaneous curvature to the look-ahead point each tick
-        and derives wheel velocities from geometry (same math as arc()).
-        Both motors always move forward (inner wheel clamped to ≥ 0).
+        Finds an interpolated look-ahead point on the path using circle-path
+        intersection, computes curvature to steer toward it, and derives
+        differential wheel velocities from the geometry.
 
         Args:
-            waypoints: List of (x, y) in world cm. First point should be
-                       near current position.
+            waypoints: List of (x, y) in world cm.
             velocity: Base forward speed in ticks/sec.
             look_ahead_cm: How far ahead on the path to aim.
             arrival_cm: Stop when within this distance of final waypoint.
@@ -225,37 +224,21 @@ class RobotDC:
         self.right.reset()
         self.heading_pid.reset()
 
-        target_idx = 1
+        last_found_idx = 0
         t = 0.0
         last_time = monotonic()
 
         while t < timeout:
-            # Stop when we've driven the full path length
-            avg_ticks = (abs(self.left.position) + abs(self.right.position)) / 2
-            driven_cm = avg_ticks / TICKS_PER_CM
-            if driven_cm >= total_length:
+            # Stop when close enough to final waypoint
+            if math.hypot(final_x - self.x, final_y - self.y) < arrival_cm:
                 break
 
-            # Advance target index: skip waypoints we're already past
-            while target_idx < len(waypoints) - 1:
-                dx = waypoints[target_idx][0] - self.x
-                dy = waypoints[target_idx][1] - self.y
-                if math.hypot(dx, dy) > look_ahead_cm:
-                    break
-                target_idx += 1
+            # Find interpolated look-ahead point on path
+            tx, ty, last_found_idx = self._find_lookahead_point(
+                waypoints, look_ahead_cm, last_found_idx
+            )
 
-            # If we've passed all waypoints, stop
-            if target_idx >= len(waypoints) - 1:
-                # Aim at final waypoint
-                target_idx = len(waypoints) - 1
-                # Stop if close enough
-                dx = waypoints[target_idx][0] - self.x
-                dy = waypoints[target_idx][1] - self.y
-                if math.hypot(dx, dy) < arrival_cm:
-                    break
-
-            # Look-ahead point and expected heading
-            tx, ty = waypoints[target_idx]
+            # Vector to look-ahead point
             dx = tx - self.x
             dy = ty - self.y
             expected_heading = math.degrees(math.atan2(dy, dx))
@@ -329,6 +312,64 @@ class RobotDC:
                 sleep(DT - elapsed)
 
         self.stop()
+
+    def _find_lookahead_point(
+        self,
+        waypoints: list[tuple[float, float]],
+        look_ahead_cm: float,
+        last_idx: int,
+    ) -> tuple[float, float, int]:
+        """Find interpolated look-ahead point using circle-path intersection.
+
+        Intersects a circle of radius look_ahead_cm centered on the robot
+        with each path segment starting from last_idx. Returns the furthest
+        valid intersection point along the path.
+
+        This is the standard pure pursuit targeting method — it produces a
+        smooth target that slides along the path, unlike snapping to the
+        nearest waypoint.
+
+        Args:
+            waypoints: The path as (x, y) points.
+            look_ahead_cm: Radius of the look-ahead circle.
+            last_idx: Start searching from this segment index.
+
+        Returns:
+            (target_x, target_y, segment_idx)
+        """
+        for i in range(last_idx, len(waypoints) - 1):
+            # Segment from p1 to p2
+            p1x, p1y = waypoints[i]
+            p2x, p2y = waypoints[i + 1]
+
+            # Segment direction vector
+            seg_dx = p2x - p1x
+            seg_dy = p2y - p1y
+
+            # Vector from robot to segment start
+            fx = p1x - self.x
+            fy = p1y - self.y
+
+            # Quadratic: |p1 + t*(p2-p1) - robot|² = r²
+            a = seg_dx * seg_dx + seg_dy * seg_dy
+            if a < 1e-6:
+                continue  # Zero-length segment
+
+            b = 2 * (fx * seg_dx + fy * seg_dy)
+            c = fx * fx + fy * fy - look_ahead_cm * look_ahead_cm
+
+            disc = b * b - 4 * a * c
+            if disc < 0:
+                continue  # Circle doesn't intersect this segment
+
+            # Take the further intersection (t2) — it's ahead on the path
+            t = (-b + math.sqrt(disc)) / (2 * a)
+
+            if 0 <= t <= 1:
+                return (p1x + t * seg_dx, p1y + t * seg_dy, i)
+
+        # No intersection found — aim at the last waypoint
+        return (*waypoints[-1], len(waypoints) - 2)
 
     def forward(self, cm: float, velocity: float = DEFAULT_VELOCITY) -> None:
         """
