@@ -51,7 +51,9 @@ class DCMotorPID:
         # State for velocity calculation
         self._last_pos = 0
         self._last_time = time.monotonic()
-        self._velocity = 0.0
+        self._velocity = 0.0  # EMA-smoothed velocity
+        self._raw_velocity = 0.0
+        self._EMA_ALPHA = 0.3  # smoothing factor (lower = smoother but slower response)
 
     def _feedforward(self, target_velocity: float) -> float:
         """Estimate PWM needed for target velocity."""
@@ -76,8 +78,11 @@ class DCMotorPID:
         # Read encoder position
         pos = self.encoder.position
 
-        # Calculate velocity = (pos - last_pos) / dt
-        velocity = (pos - self._last_pos) / dt
+        # Calculate raw velocity, then smooth with EMA to reduce step-function noise
+        raw_velocity = (pos - self._last_pos) / dt
+        velocity = (
+            self._EMA_ALPHA * raw_velocity + (1 - self._EMA_ALPHA) * self._velocity
+        )
 
         # Feedforward + PID correction
         feedforward = self._feedforward(target_velocity)
@@ -100,6 +105,11 @@ class DCMotorPID:
     def position(self) -> int:
         """Total ticks traveled (cumulative)."""
         return self.encoder.position
+
+    @property
+    def raw_velocity(self) -> float:
+        """Raw velocity (ticks/sec) before smoothing."""
+        return self._raw_velocity
 
     def reset(self) -> None:
         """Reset encoder position and PID state."""
