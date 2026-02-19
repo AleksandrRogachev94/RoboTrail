@@ -14,8 +14,8 @@ from sensors.servo import HWServo
 class Scanner:
     def __init__(
         self,
-        num_points=40,
-        timing_budget=100,
+        num_points=80,
+        timing_budget=50,
         settle_delay=0.03,
         distance_mode=2,
         servo_reversed=True,

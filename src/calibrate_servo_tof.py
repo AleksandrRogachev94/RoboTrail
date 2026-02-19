@@ -89,11 +89,11 @@ def test_num_points():
 # ============================================================
 def test_settle_delay():
     configs = [
-        {"settle_delay": 0.00, "label": "0ms"},
         {"settle_delay": 0.01, "label": "10ms"},
+        {"settle_delay": 0.03, "label": "30ms"},
+        {"settle_delay": 0.04, "label": "40ms"},
         {"settle_delay": 0.05, "label": "50ms"},
         {"settle_delay": 0.1, "label": "100ms"},
-        {"settle_delay": 0.2, "label": "200ms"},
     ]
     results = []
     for cfg in configs:
