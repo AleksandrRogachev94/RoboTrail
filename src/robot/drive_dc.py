@@ -475,17 +475,27 @@ class RobotDC:
         omega = velocity / TICKS_PER_CM / abs(radius_cm)
 
         # Compute wheel velocities based on turn direction
+        direction = 1.0 if arc_length_cm >= 0 else -1.0
+
         if radius_cm > 0:  # Left turn: left wheel is inner
-            left_vel = omega * (radius_cm - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
-            right_vel = omega * (radius_cm + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
-            turn_sign = 1  # Heading increases (CCW)
+            left_vel = (
+                direction * omega * (radius_cm - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            )
+            right_vel = (
+                direction * omega * (radius_cm + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            )
+            turn_sign = 1 * direction  # Heading increases (CCW)
         else:  # Right turn: right wheel is inner
-            left_vel = omega * (abs(radius_cm) + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
-            right_vel = omega * (abs(radius_cm) - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
-            turn_sign = -1  # Heading decreases (CW)
+            left_vel = (
+                direction * omega * (abs(radius_cm) + TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            )
+            right_vel = (
+                direction * omega * (abs(radius_cm) - TRACK_WIDTH_CM / 2) * TICKS_PER_CM
+            )
+            turn_sign = -1 * direction  # Heading decreases (CW)
 
         # Target arc in ticks (use average of both wheels' paths)
-        target_ticks = arc_length_cm * TICKS_PER_CM
+        target_ticks = abs(arc_length_cm) * TICKS_PER_CM
         start_heading = self._heading
 
         # Control loop

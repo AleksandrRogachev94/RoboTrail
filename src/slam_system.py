@@ -184,11 +184,20 @@ class SlamSystem:
                 )
                 wp1_diff = abs((angle_to_wp1 - self.pose[2] + 180) % 360 - 180)
                 if wp1_diff > self.SHARP_TURN_DEG:
-                    print(
-                        f"Sharp first waypoint ({wp1_diff:.0f}°) — "
-                        f"backing up {self.BACKUP_CM}cm before path"
-                    )
-                    self._back_up(self.BACKUP_CM)
+                    left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
+                    right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
+
+                    if left_dist > right_dist + 5.0:
+                        print(
+                            f"Sharp first waypoint ({wp1_diff:.0f}°) — Left clearer, turning nose left"
+                        )
+                        self._back_up_arc(-25.0, -15.0)
+                    else:
+                        # Default to favoring the right side if equal or right is clearer
+                        print(
+                            f"Sharp first waypoint ({wp1_diff:.0f}°) — Right clearer (or tie), turning nose right"
+                        )
+                        self._back_up_arc(25.0, -15.0)
                     continue  # re-plan from new position
 
             # Store full planned path for UI display
@@ -411,11 +420,20 @@ class SlamSystem:
         angle = math.degrees(math.atan2(gy - self.pose[1], gx - self.pose[0]))
         heading_diff = abs((angle - self.pose[2] + 180) % 360 - 180)
         if heading_diff > self.STRONGLY_BEHIND_DEG:
-            backup = self.BACKUP_CM * 1.5  # extra room for near-180° arc
-            print(
-                f"Goal behind robot ({heading_diff:.0f}°) — backing up {backup:.0f}cm"
-            )
-            self._back_up(backup)
+            left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
+            right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
+
+            if left_dist > right_dist + 5.0:
+                print(
+                    f"Goal behind ({heading_diff:.0f}°) — Left clearer, turning nose left"
+                )
+                self._back_up_arc(-25.0, -20.0)
+            else:
+                # Default to favoring the right side if equal or right is clearer
+                print(
+                    f"Goal behind ({heading_diff:.0f}°) — Right clearer (or tie), turning nose right"
+                )
+                self._back_up_arc(25.0, -20.0)
         self._move_scan_update(goal)
         self.explore_goal = None
 
@@ -450,14 +468,38 @@ class SlamSystem:
             return
         self._scan_and_update()
 
-    def _back_up(self, distance_cm: float):
-        """Back up to create room for a sharp turn."""
+    def _back_up_arc(self, radius_cm: float, arc_length_cm: float):
+        """Back up in an arc to swing the nose into free space."""
         try:
             self.state = "MOVING"
             self.robot.imu.calibrate_gyro(samples=100)
             self.robot.history = []
-            self.robot.forward(-distance_cm)
+            self.robot.arc(radius_cm, arc_length_cm)
             self.pose = self.robot.get_pose()
             self.path_history.append((self.pose[0], self.pose[1]))
         except Exception as e:
-            print(f"Backup failed: {e}")
+            print(f"Backup arc failed: {e}")
+
+    def _get_clearance(self, angle_deg: float, max_dist_cm: float = 40.0) -> float:
+        """Raycast on the grid to find free distance along 'angle_deg'."""
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        step_cm = 2.0
+        dist = 0.0
+        grid_data = self.grid.grid
+        rows, cols = grid_data.shape
+
+        while dist < max_dist_cm:
+            cx = self.pose[0] + dist * cos_a
+            cy = self.pose[1] + dist * sin_a
+            r, c = self.grid.world_to_grid(cx, cy)
+
+            if not (0 <= r < rows and 0 <= c < cols):
+                break
+            if grid_data[r, c] >= 0.5:  # Obstacle or Unknown
+                break
+            dist += step_cm
+
+        return dist
