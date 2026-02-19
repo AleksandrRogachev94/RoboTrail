@@ -35,6 +35,11 @@ def get_state():
             "planned": slam.planned_waypoints,
             "icp_corrections": slam.icp_corrections,
             "pid": slam.pid_summary,
+            "frontier_target": slam.frontier_target,
+            "frontier_clusters": [
+                {"x": c["centroid_xy"][0], "y": c["centroid_xy"][1], "size": c["size"]}
+                for c in slam.frontier_clusters
+            ],
         }
     )
 
@@ -53,6 +58,16 @@ def set_target():
     if ok:
         return jsonify({"status": "ok"})
     return jsonify({"status": "busy"}), 409
+
+
+@app.route("/api/explore", methods=["POST"])
+def start_explore():
+    if slam.state != "IDLE":
+        return jsonify({"status": "busy"}), 409
+    import threading
+
+    threading.Thread(target=slam.explore, daemon=True).start()
+    return jsonify({"status": "ok"})
 
 
 def shutdown(sig, frame):

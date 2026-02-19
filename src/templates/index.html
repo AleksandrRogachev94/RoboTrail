@@ -79,7 +79,10 @@
 <div class="canvas-wrap">
   <canvas id="c" width="720" height="720"></canvas>
 </div>
-<div id="hint">click on map to move robot</div>
+<div id="hint">click on map to move robot · or explore automatically</div>
+<div style="margin-top:8px">
+  <button id="explore-btn" onclick="startExplore()" style="background:#4ecca3;color:#0f0f1a;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:0.9em">🔍 Explore</button>
+</div>
 <div style="margin-top:12px;width:720px">
   <canvas id="pid-chart" height="150" style="background:#12121f;border-radius:4px"></canvas>
 </div>
@@ -97,6 +100,8 @@ let state = 'IDLE';
 let path = [];          // [(x,y), ...] visited positions
 let planned = [];       // [(x,y), ...] planned waypoints
 let icpCorr = [];       // [{from, to}, ...] ICP corrections
+let frontierTarget = null;  // {x, y} current exploration target
+let frontierClusters = [];  // [{x, y, size}, ...] cluster centroids
 
 // ── Single unified poll ──────────────────────────────────────────
 
@@ -110,6 +115,8 @@ function poll() {
     path = d.path || [];
     planned = d.planned || [];
     icpCorr = d.icp_corrections || [];
+    frontierTarget = d.frontier_target || null;
+    frontierClusters = d.frontier_clusters || [];
 
     // Update status bar
     const stEl = document.getElementById('st');
@@ -426,6 +433,39 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(tx, ty-8); ctx.lineTo(tx, ty+8); ctx.stroke();
     ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI*2); ctx.stroke();
   }
+
+  // ── Frontier clusters (orange diamonds) ─────────────────────
+  for (const c of frontierClusters) {
+    const [cx, cy] = w2c(c.x, c.y);
+    const r = Math.min(3 + c.size * 0.3, 8);
+    ctx.fillStyle = 'rgba(255, 165, 0, 0.5)';
+    ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx + r, cy);
+    ctx.lineTo(cx, cy + r);
+    ctx.lineTo(cx - r, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ── Frontier target (green pulsing diamond) ─────────────────
+  if (frontierTarget) {
+    const [fx, fy] = w2c(frontierTarget[0], frontierTarget[1]);
+    ctx.fillStyle = 'rgba(78, 204, 163, 0.6)';
+    ctx.strokeStyle = '#4ecca3';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fx, fy - 8);
+    ctx.lineTo(fx + 8, fy);
+    ctx.lineTo(fx, fy + 8);
+    ctx.lineTo(fx - 8, fy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
 }
 
 function w2c(wx, wy) {
@@ -441,6 +481,12 @@ function w2c(wx, wy) {
 // Initial
 draw();
 poll();
+
+function startExplore() {
+  if (state !== 'IDLE') return;
+  if (!confirm('Start autonomous exploration?')) return;
+  fetch('/api/explore', {method: 'POST'});
+}
 
 // ── PID Chart (Chart.js) ───────────────────────────────────────────
 
