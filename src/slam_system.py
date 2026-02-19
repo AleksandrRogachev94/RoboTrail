@@ -414,6 +414,31 @@ class SlamSystem:
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
+        if dist < self.MIN_FRONTIER_DIST:
+            print(f"Frontier too close ({dist:.0f}cm) — driving forward to get better angle")
+            heading_rad = math.radians(self.pose[2])
+            check_x = self.pose[0] + self.BOOTSTRAP_DRIVE_CM * math.cos(heading_rad)
+            check_y = self.pose[1] + self.BOOTSTRAP_DRIVE_CM * math.sin(heading_rad)
+            cr, cc = self.grid.world_to_grid(check_x, check_y)
+            traversable = self.grid.get_traversability_grid()
+            wall_ahead = (
+                0 <= cr < traversable.shape[0]
+                and 0 <= cc < traversable.shape[1]
+                and not traversable[cr, cc]
+            )
+            if wall_ahead:
+                left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
+                right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
+                if left_dist > right_dist + 5.0:
+                    print("Wall ahead and frontier too close — arcing left")
+                    self._back_up_arc(-25.0, -15.0)
+                else:
+                    print("Wall ahead and frontier too close — arcing right")
+                    self._back_up_arc(25.0, -15.0)
+            else:
+                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
+            return
+
         # Navigate to goal
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"

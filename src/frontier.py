@@ -25,6 +25,7 @@ from robot.config import GRID_RESOLUTION
 
 MIN_CLUSTER_SIZE = 30  # Filter small interior holes; real frontiers are 100+ cells
 STANDOFF_CM = 15.0  # Pull goal back from frontier edge (arc room)
+MIN_FRONTIER_DIST = 15.0 
 HEADING_PENALTY_WEIGHT = 0.8  # cm per degree — strongly prefer forward-facing goals
 
 # 8-connected neighbors for adjacency checks and BFS
@@ -171,6 +172,9 @@ def select_goal(
         if score < best_score:
             best_score = score
             best_goal = (gx, gy)
+
+    if best_goal and math.hypot(best_goal[0] - rx, best_goal[1] - ry) < MIN_FRONTIER_DIST:
+        return None  # force re-evaluation rather than targeting something we're on top of
 
     return best_goal
 
