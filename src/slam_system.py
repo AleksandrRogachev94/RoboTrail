@@ -16,9 +16,8 @@ import lgpio
 import numpy as np
 
 from icp import icp
-from occupancy_grid import OccupancyGrid
+from occupancy_grid import OccupancyGrid, scan_to_world
 from path_planner import plan_and_smooth
-from robot.config import TOF_OFFSET_X, TOF_OFFSET_Y
 from robot.drive_dc import RobotDC
 from scanner import Scanner
 
@@ -242,29 +241,54 @@ class SlamSystem:
             if self.use_icp and len(scan) > 5:
                 map_points = self.grid.get_occupied_points()
 
+                # Only match against nearby map points (within 200cm of robot)
+                # Prevents cross-wall matches when pose estimate is slightly off
+                if len(map_points) > 0:
+                    dist_to_robot = np.linalg.norm(
+                        map_points - np.array([pose[0], pose[1]]), axis=1
+                    )
+                    map_points = map_points[dist_to_robot < 200]
+
                 if len(map_points) > 10:
-                    scan_world = self._scan_to_world(scan, pose)
-                    R, t, _, ok = icp(scan_world, map_points, max_distance=20)
+                    scan_world, _ = scan_to_world(scan, pose)
+                    R, t, _, ok = icp(scan_world, map_points, max_distance=8)
 
                     if ok:
                         corr_pos = R @ np.array([pose[0], pose[1]]) + t
                         corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
                         dx = corr_pos[0] - pose[0]
                         dy = corr_pos[1] - pose[1]
-                        self.robot.set_pose(
-                            corr_pos[0], corr_pos[1], pose[2] + corr_angle
-                        )
-                        pose = self.robot.get_pose()
-                        self.icp_result = {
-                            "status": "converged",
-                            "dx": round(dx, 1),
-                            "dy": round(dy, 1),
-                            "dtheta": round(corr_angle, 1),
-                            "map_pts": len(map_points),
-                        }
-                        print(
-                            f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° (map: {len(map_points)} pts)"
-                        )
+
+                        # Sanity cap: reject implausibly large corrections
+                        # These are almost always bad matches, not real drift
+                        correction_dist = math.hypot(dx, dy)
+                        if correction_dist > 10.0 or abs(corr_angle) > 10.0:
+                            self.icp_result = {
+                                "status": "rejected",
+                                "dx": round(dx, 1),
+                                "dy": round(dy, 1),
+                                "dtheta": round(corr_angle, 1),
+                                "map_pts": len(map_points),
+                            }
+                            print(
+                                f"ICP rejected: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
+                                f"(too large, map: {len(map_points)} pts)"
+                            )
+                        else:
+                            self.robot.set_pose(
+                                corr_pos[0], corr_pos[1], pose[2] + corr_angle
+                            )
+                            pose = self.robot.get_pose()
+                            self.icp_result = {
+                                "status": "converged",
+                                "dx": round(dx, 1),
+                                "dy": round(dy, 1),
+                                "dtheta": round(corr_angle, 1),
+                                "map_pts": len(map_points),
+                            }
+                            print(
+                                f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° (map: {len(map_points)} pts)"
+                            )
                     else:
                         self.icp_result = {
                             "status": "failed",
@@ -283,12 +307,3 @@ class SlamSystem:
             self.state = "ERROR"
             self.message = f"Scan error: {e}"
             traceback.print_exc()
-
-    def _scan_to_world(self, scan_sensor, pose):
-        """Transform sensor-frame scan points to world frame."""
-        x, y, heading_deg = pose
-        theta = math.radians(heading_deg)
-        c, s = math.cos(theta), math.sin(theta)
-        R = np.array([[c, -s], [s, c]])
-        scan_robot = scan_sensor + [TOF_OFFSET_X, TOF_OFFSET_Y]
-        return (R @ scan_robot.T).T + np.array([x, y])

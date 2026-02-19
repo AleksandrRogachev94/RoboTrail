@@ -31,6 +31,40 @@ from robot.config import (
 )
 
 
+def scan_to_world(scan_points: np.ndarray, robot_pose: tuple):
+    """Convert sensor-frame scan points to world coordinates.
+
+    The scanner returns points relative to the TOF sensor. This function:
+    1. Computes the sensor's position in world frame (robot pos + rotated offset)
+    2. Rotates scan vectors by robot heading (sensor frame → world orientation)
+    3. Translates from sensor position
+
+    Args:
+        scan_points: (N, 2) array of [x, y] in sensor frame (from Scanner).
+        robot_pose:  (x, y, heading_deg) in world frame.
+
+    Returns:
+        (world_points, sensor_origin):
+            world_points: (N, 2) array of hit positions in world frame.
+            sensor_origin: (2,) sensor position in world frame.
+    """
+    rx, ry, heading_deg = robot_pose
+    heading = math.radians(heading_deg)
+    c, s = math.cos(heading), math.sin(heading)
+
+    sensor_origin = np.array(
+        [
+            rx + TOF_OFFSET_X * c - TOF_OFFSET_Y * s,
+            ry + TOF_OFFSET_X * s + TOF_OFFSET_Y * c,
+        ]
+    )
+
+    R = np.array([[c, -s], [s, c]])
+    world_points = (R @ np.asarray(scan_points).T).T + sensor_origin
+
+    return world_points, sensor_origin
+
+
 class OccupancyGrid:
     """2D probabilistic occupancy grid."""
 
@@ -111,40 +145,22 @@ class OccupancyGrid:
         """Update the grid with one scan from a known robot pose.
 
         For each scan point:
-        1. Compute the sensor position in world frame (apply TOF offset)
-        2. Convert sensor position and hit point to grid coordinates
-        3. Bresenham ray trace from sensor to hit point
-        4. Mark free cells (all cells along ray EXCEPT last) → subtract L_FREE
-        5. Mark occupied cell (last cell in ray) → add L_OCC
-        6. Clamp all updated cells to [L_MIN, L_MAX]
+        1. Compute hit position in world frame (via scan_to_world)
+        2. Bresenham ray trace from sensor to hit point
+        3. Mark free cells (all cells along ray EXCEPT last) → subtract L_FREE
+        4. Mark occupied cell (last cell in ray) → add L_OCC
+        5. Clamp all updated cells to [L_MIN, L_MAX]
 
         Args:
-            scan_points: (N, 2) array of hit points in ROBOT frame (from Scanner).
-                         Each row is [x, y] in cm relative to robot center.
+            scan_points: (N, 2) array in sensor frame (from Scanner).
             robot_pose:  (x, y, heading_deg) — robot position in world frame.
-                         x, y in cm, heading in degrees.
         """
-        rx, ry, heading_deg = robot_pose
-        heading = math.radians(heading_deg)
+        world_points, sensor_origin = scan_to_world(scan_points, robot_pose)
 
-        # Sensor position in world frame (apply TOF offset)
-        # The TOF is mounted TOF_OFFSET_X cm forward of robot center
-        sensor_wx = (
-            rx + TOF_OFFSET_X * math.cos(heading) - TOF_OFFSET_Y * math.sin(heading)
-        )
-        sensor_wy = (
-            ry + TOF_OFFSET_X * math.sin(heading) + TOF_OFFSET_Y * math.cos(heading)
-        )
+        sensor_row, sensor_col = self.world_to_grid(sensor_origin[0], sensor_origin[1])
 
-        # Convert sensor position to grid
-        sensor_row, sensor_col = self.world_to_grid(sensor_wx, sensor_wy)
-
-        for point in scan_points:
-            local_x, local_y = point
-
-            # Robot frame → world frame (rotate by heading, translate by robot pos)
-            world_x = rx + local_x * math.cos(heading) - local_y * math.sin(heading)
-            world_y = ry + local_x * math.sin(heading) + local_y * math.cos(heading)
+        for i in range(len(world_points)):
+            world_x, world_y = world_points[i]
 
             # Convert hit point to grid coordinates
             hit_row, hit_col = self.world_to_grid(world_x, world_y)

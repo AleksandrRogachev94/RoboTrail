@@ -167,8 +167,8 @@ def compute_point_to_line_step(matched_source, matched_target, normals):
     dx, dy, dtheta = result
 
     # Clamp to prevent wild steps (especially rotation)
-    max_translation = 30.0  # cm
-    max_rotation = np.radians(15.0)  # 15 degrees per iteration
+    max_translation = 5.0  # cm per iteration (conservative)
+    max_rotation = np.radians(5.0)  # 5 degrees per iteration
     dx = np.clip(dx, -max_translation, max_translation)
     dy = np.clip(dy, -max_translation, max_translation)
     dtheta = np.clip(dtheta, -max_rotation, max_rotation)
@@ -234,13 +234,18 @@ def icp(
         if len(matched_source) < 3:
             break
 
+        # Require at least 40% of source points to have matches
+        # Otherwise ICP is fitting to too few points and is unreliable
+        match_ratio = len(matched_source) / len(source)
+        if match_ratio < 0.4:
+            break
+
         # Step 2: Decide which correspondences have reliable normals
         if map_normals is not None and len(tgt_indices) > 0:
             corr_normals = map_normals[tgt_indices]
             corr_reliable = map_reliable[tgt_indices]
 
             n_reliable = corr_reliable.sum()
-            n_total = len(corr_reliable)
 
             if n_reliable >= 3:
                 # --- Hybrid step ---
