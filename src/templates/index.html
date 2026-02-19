@@ -3,126 +3,269 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RoboTrail</title>
+<title>RoboTrail Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: system-ui, sans-serif;
-    background: #0f0f1a;
-    color: #e0e0e0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0b0c10;
+    color: #c5c6c7;
+    height: 100vh;
+    overflow: hidden; /* Prevent scrolling */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  header {
+    background: #1f2833;
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #2d3642;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+  h1 { font-size: 1.4em; color: #66fcf1; }
+
+  /* Main Layout */
+  .container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    padding: 20px;
+    gap: 20px;
+  }
+
+  /* Left Panel (Map) */
+  .map-panel {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 16px;
-    min-height: 100vh;
-  }
-  h1 {
-    font-size: 1.5em;
-    margin-bottom: 10px;
-    color: #fff;
-    letter-spacing: 1px;
-  }
-  #status {
-    background: rgba(255,255,255,0.06);
-    backdrop-filter: blur(8px);
-    padding: 8px 20px;
+    justify-content: center;
+    background: #171d24;
     border-radius: 8px;
-    margin-bottom: 14px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.85em;
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid #2d3642;
+    position: relative;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
   }
-  .s-idle { color: #4ecca3; }
-  .s-moving { color: #f7b731; }
-  .s-scanning { color: #45aaf2; }
-  .s-planning { color: #a55eea; }
-  .s-exploring { color: #ff6b81; }
-  .s-error { color: #fc5c65; }
-  #status .label { color: #888; }
-  #status .val { color: #4ecca3; }
-
   .canvas-wrap {
     position: relative;
-    border-radius: 6px;
+    border-radius: 4px;
     overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    /* Fit nicely without forced scrolling */
+    max-height: 100%;
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
-  canvas {
+  canvas#c {
     display: block;
     cursor: crosshair;
+    background: #0e0e1a;
+    /* Use max constraints so it scales down if screen is small */
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
   }
-  /* Axis labels drawn on canvas, but we add a subtle info line below */
   #hint {
-    font-size: 0.75em;
-    color: #555;
-    margin-top: 10px;
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    font-size: 0.8em;
+    color: #66fcf1;
+    opacity: 0.7;
     font-style: italic;
+    background: rgba(0,0,0,0.4);
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
   }
-  #explore-btn {
-    margin-top: 8px;
-    padding: 8px 24px;
-    border: 1px solid rgba(255,107,129,0.4);
-    background: rgba(255,107,129,0.12);
-    color: #ff6b81;
+  #legend {
+    position: absolute;
+    bottom: 15px;
+    left: 15px;
+    background: rgba(11, 12, 16, 0.85);
+    padding: 8px 12px;
     border-radius: 6px;
-    font-family: 'SF Mono', monospace;
-    font-size: 0.85em;
-    cursor: pointer;
-    transition: background 0.15s;
+    font-size: 0.75em;
+    pointer-events: none;
+    color: #c5c6c7;
+    border: 1px solid #2d3642;
   }
-  #explore-btn:hover { background: rgba(255,107,129,0.25); }
+  .leg-item { display: flex; align-items: center; margin-top: 4px; }
+  .leg-box { width: 12px; height: 12px; margin-right: 8px; border-radius: 2px; }
+
+  /* Right Panel (Stats & Controls) */
+  .side-panel {
+    width: 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow-y: auto; /* Allow scrolling here if needed, but rarely needed */
+  }
+
+  /* Cards */
+  .card {
+    background: #1f2833;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #2d3642;
+  }
+  .card h3 {
+    font-size: 0.9em;
+    text-transform: uppercase;
+    color: #45a29e;
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #2d3642;
+    padding-bottom: 6px;
+  }
+
+  /* State / HUD */
+  .hud-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .hud-item {
+    background: rgba(11,12,16,0.5);
+    padding: 8px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+  .hud-lbl { font-size: 0.7em; color: #888; text-transform: uppercase; margin-bottom: 4px; }
+  .hud-val { font-family: 'SF Mono', monospace; font-size: 0.9em; color: #fff; }
+
+  .s-idle { color: #4ecca3 !important; }
+  .s-moving { color: #f7b731 !important; }
+  .s-scanning { color: #45aaf2 !important; }
+  .s-planning { color: #a55eea !important; }
+  .s-exploring { color: #ff6b81 !important; }
+  .s-error { color: #fc5c65 !important; }
+
+  #msg {
+    margin-top: 10px;
+    font-size: 0.85em;
+    color: #aaa;
+    background: rgba(0,0,0,0.2);
+    padding: 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    min-height: 2em;
+  }
+
+  /* Explore Button */
+  #explore-btn {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid rgba(102, 252, 241, 0.4);
+    background: rgba(102, 252, 241, 0.1);
+    color: #66fcf1;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 1.1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  #explore-btn:hover { background: rgba(102, 252, 241, 0.25); }
   #explore-btn.active {
     border-color: rgba(252,92,101,0.6);
     background: rgba(252,92,101,0.2);
     color: #fc5c65;
   }
-  #legend {
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 0.75em;
-    pointer-events: none;
-    color: #ccc;
-    font-family: sans-serif;
+
+  /* Chart */
+  .chart-container {
+    height: 180px;
+    width: 100%;
+    margin-top: 8px;
   }
-  .leg-item { display: flex; align-items: center; margin-top: 2px; }
-  .leg-box { width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; }
 </style>
 </head>
 <body>
 
-<h1>🤖 RoboTrail</h1>
-<div id="status">
-  <span class="label">State:</span> <span id="st" class="s-idle">--</span>
-  &nbsp;·&nbsp;
-  <span class="label">Pose:</span> <span id="pose" class="val">--</span>
-  &nbsp;·&nbsp;
-  <span id="msg" style="color:#777">--</span>
-</div>
-<div id="icp-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:4px;color:#666">
-  ICP: <span id="icp">--</span>
-</div>
-<div id="pid-info" style="font-family:'SF Mono',monospace;font-size:0.8em;margin-bottom:10px;color:#666">
-  PID: <span id="pid">waiting for movement...</span>
-</div>
-<div class="canvas-wrap">
-  <canvas id="c" width="800" height="800"></canvas>
-  <div id="legend">
-    <div class="leg-item"><div class="leg-box" style="background:#e74c3c"></div>Robot</div>
-    <div class="leg-item"><div class="leg-box" style="background:rgba(255, 200, 80, 0.9)"></div>Path</div>
-    <div class="leg-item"><div class="leg-box" style="background:#fd79a8"></div>Frontier</div>
-    <div class="leg-item"><div class="leg-box" style="background:#a55eea"></div>Planned</div>
-    <div class="leg-item"><div class="leg-box" style="background:rgba(52, 152, 219, 0.4)"></div>Traversable</div>
+<header>
+  <h1>🤖 RoboTrail Dashboard</h1>
+  <div style="font-family:'SF Mono',monospace;font-size:0.85em;">
+    <span style="color:#888">ICP: </span><span id="icp">--</span>
   </div>
-</div>
-<div id="hint">click on map to move robot</div>
-<button id="explore-btn" onclick="toggleExplore()">🔍 Explore</button>
-<div style="margin-top:12px;width:800px">
-  <canvas id="pid-chart" height="150" style="background:#12121f;border-radius:4px"></canvas>
+</header>
+
+<div class="container">
+
+  <!-- LEFT: Map -->
+  <div class="map-panel">
+    <div class="canvas-wrap">
+      <canvas id="c" width="800" height="800"></canvas>
+    </div>
+    <div id="hint">Click map to navigate</div>
+    <div id="legend">
+      <div class="leg-item"><div class="leg-box" style="background:#e74c3c"></div>Robot</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(255, 200, 80, 0.9)"></div>Path</div>
+      <div class="leg-item"><div class="leg-box" style="background:#fd79a8"></div>Frontier</div>
+      <div class="leg-item"><div class="leg-box" style="background:#a55eea"></div>Planned</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(52, 152, 219, 0.4)"></div>Traversable</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Stats & Controls -->
+  <div class="side-panel">
+
+    <!-- HUD Card -->
+    <div class="card">
+      <h3>System HUD</h3>
+      <div class="hud-grid">
+        <div class="hud-item">
+          <span class="hud-lbl">State</span>
+          <span id="st" class="hud-val s-idle">--</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Pose (x, y, θ)</span>
+          <span id="pose" class="hud-val">--</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Map Version</span>
+          <span id="map-ver" class="hud-val">0 scans</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Frontiers Left</span>
+          <span id="frontier-count" class="hud-val">0</span>
+        </div>
+        <div class="hud-item" style="grid-column: span 2;">
+          <span class="hud-lbl">Target / Explore Goal</span>
+          <span id="target-info" class="hud-val">None</span>
+        </div>
+      </div>
+      <div id="msg">--</div>
+    </div>
+
+    <!-- Controls Card -->
+    <div class="card">
+      <h3>Exploration</h3>
+      <button id="explore-btn" onclick="toggleExplore()">🔍 Start Exploring</button>
+    </div>
+
+    <!-- Diagnostics Card -->
+    <div class="card">
+      <h3>Motion Diagnostics</h3>
+      <div id="pid" style="font-family:'SF Mono',monospace;font-size:0.75em;color:#888;margin-bottom:4px;">
+        waiting for movement...
+      </div>
+      <div class="chart-container">
+        <canvas id="pid-chart"></canvas>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
@@ -164,19 +307,35 @@ function poll() {
       btn.textContent = '⏹ Stop Exploring';
       btn.classList.add('active');
     } else {
-      btn.textContent = '🔍 Explore';
+      btn.textContent = '🔍 Start Exploring';
       btn.classList.remove('active');
     }
 
-    // Update status bar
+    // Update system HUD
     const stEl = document.getElementById('st');
     stEl.textContent = d.state;
-    stEl.className = 's-' + d.state.toLowerCase();
-    document.getElementById('pose').textContent =
-      `(${d.pose[0].toFixed(1)}, ${d.pose[1].toFixed(1)}, ${d.pose[2].toFixed(0)}°)`;
-    document.getElementById('msg').textContent = d.message;
+    stEl.className = 'hud-val s-' + d.state.toLowerCase();
 
-    // ICP display
+    document.getElementById('pose').textContent =
+      `${d.pose[0].toFixed(1)}, ${d.pose[1].toFixed(1)}, ${d.pose[2].toFixed(0)}°`;
+
+    document.getElementById('map-ver').textContent = `${d.map_version} scans`;
+    document.getElementById('frontier-count').textContent = frontiers.length;
+
+    // Target computation
+    let tgtDisplay = "None";
+    if (target) {
+        const dist = Math.hypot(target[0] - pose[0], target[1] - pose[1]);
+        tgtDisplay = `User Map Click (${dist.toFixed(0)}cm away)`;
+    } else if (exploreGoal) {
+        const dist = Math.hypot(exploreGoal[0] - pose[0], exploreGoal[1] - pose[1]);
+        tgtDisplay = `Frontier (${dist.toFixed(0)}cm away)`;
+    }
+    document.getElementById('target-info').textContent = tgtDisplay;
+
+    document.getElementById('msg').textContent = d.message || "Idle";
+
+    // Header ICP Status
     const icpEl = document.getElementById('icp');
     if (d.icp) {
       if (d.icp.status === 'converged') {
@@ -189,27 +348,26 @@ function poll() {
         icpEl.style.color = '#f7b731';
         icpEl.textContent = 'building initial map...';
       } else {
-        icpEl.style.color = '#666';
+        icpEl.style.color = '#888';
         icpEl.textContent = d.icp.status;
       }
     }
 
-    // PID charts
+    // PID diagnostics
     const pidEl = document.getElementById('pid');
     if (d.pid && d.pid.t && d.pid.t.length > 1) {
-      pidEl.style.color = '#b0b0b0';
       const n = d.pid.t.length;
       const dur = d.pid.t[n-1].toFixed(1);
-      pidEl.textContent = `${n} samples over ${dur}s`;
+      pidEl.textContent = `Last Move: ${n} points over ${dur}s`;
       drawPidCharts(d.pid);
     }
 
-    // Fetch map only when version changes
+    // Map refresh logic
     if (d.map_version !== mapVersion) {
       mapVersion = d.map_version;
       fetchMap();
     } else {
-      draw(); // still redraw for target/pose overlay updates
+      draw(); // still redraw for overlays
     }
   }).catch(() => {});
 }
@@ -228,12 +386,16 @@ canvas.onclick = (e) => {
   if (!mapData || !mapLayout) return;
 
   const rect = canvas.getBoundingClientRect();
-  const px = e.clientX - rect.left;
-  const py = e.clientY - rect.top;
+  // Adjust for CSS scaling vs Canvas real resolution
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+
   const [xmin, xmax, ymin, ymax] = mapData.bounds;
   const {ox, oy, w, h} = mapLayout;
 
-  // Only respond to clicks inside the map area
   if (px < ox || px > ox + w || py < oy || py > oy + h) return;
 
   const wx = xmin + ((px - ox) / w) * (xmax - xmin);
@@ -249,37 +411,22 @@ canvas.onclick = (e) => {
 };
 
 // ── Colormap ─────────────────────────────────────────────────────
-// 3-stop linear: free=dark blue-gray, unknown=very dark, occupied=bright cyan
 
 function probToColor(p) {
   if (p < 0.5) {
-    // Free (0) → Unknown (0.5)
-    // p=0: explored free space, show as visible dark blue-gray
-    // p=0.5: unknown/unseen, show as dark background
     const t = p / 0.5;
-    return [
-      lerp(35, 14, t),
-      lerp(50, 16, t),
-      lerp(70, 28, t),
-    ];
+    return [lerp(35, 14, t), lerp(50, 16, t), lerp(70, 28, t)];
   } else {
-    // Unknown (0.5) → Occupied (1.0)
-    // Linear ramp to bright cyan-green
     const t = (p - 0.5) / 0.5;
-    return [
-      lerp(14, 0, t),
-      lerp(16, 230, t),
-      lerp(28, 180, t),
-    ];
+    return [lerp(14, 0, t), lerp(16, 230, t), lerp(28, 180, t)];
   }
 }
-
 function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
 
 // ── Drawing ──────────────────────────────────────────────────────
 
 const MARGIN = 40;
-let mapLayout = null; // {ox, oy, w, h} — map drawing rect, set in draw()
+let mapLayout = null;
 
 function draw() {
   ctx.fillStyle = '#0e0e1a';
@@ -296,23 +443,19 @@ function draw() {
   const {grid, bounds, rows, cols} = mapData;
   const [xmin, xmax, ymin, ymax] = bounds;
 
-  // Available drawing area
-  const avail = W - MARGIN * 2;
-
-  // Preserve aspect ratio
+  const availW = W - MARGIN * 2;
+  const availH = H - MARGIN * 2;
   const worldW = xmax - xmin;
   const worldH = ymax - ymin;
-  const scale = Math.min(avail / worldW, avail / worldH);
+
+  const scale = Math.min(availW / worldW, availH / worldH);
   const drawW = worldW * scale;
   const drawH = worldH * scale;
 
-  // Center in available area
-  const ox = MARGIN + (avail - drawW) / 2;
-  const oy = MARGIN + (avail - drawH) / 2;
-
+  const ox = MARGIN + (availW - drawW) / 2;
+  const oy = MARGIN + (availH - drawH) / 2;
   mapLayout = {ox, oy, w: drawW, h: drawH};
 
-  // Build pixel image from grid
   const imgData = ctx.createImageData(cols, rows);
   const d = imgData.data;
 
@@ -320,24 +463,20 @@ function draw() {
     for (let c = 0; c < cols; c++) {
       const p = grid[r][c];
       const [cr, cg, cb] = probToColor(p);
-      const imgRow = rows - 1 - r; // flip Y
+      const imgRow = rows - 1 - r;
       const idx = (imgRow * cols + c) * 4;
-      d[idx] = cr;
-      d[idx+1] = cg;
-      d[idx+2] = cb;
-      d[idx+3] = 255;
+      d[idx] = cr; d[idx+1] = cg; d[idx+2] = cb; d[idx+3] = 255;
     }
   }
 
-  // Render: crisp pixels (no blurring)
   const offscreen = new OffscreenCanvas(cols, rows);
   const offCtx = offscreen.getContext('2d');
   offCtx.putImageData(imgData, 0, 0);
 
-  ctx.imageSmoothingEnabled = false; // crisp pixels
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(offscreen, ox, oy, drawW, drawH);
 
-  // ── Traversability overlay (blue tint on drivable cells) ────
+  // Traversability overlay
   if (mapData.traversable) {
     const travCanvas = new OffscreenCanvas(cols, rows);
     const travCtx = travCanvas.getContext('2d');
@@ -356,13 +495,12 @@ function draw() {
     ctx.drawImage(travCanvas, ox, oy, drawW, drawH);
   }
 
-  // ── Grid lines + axis labels ─────────────────────────────────
+  // Axes
   ctx.fillStyle = '#555';
   ctx.font = '11px monospace';
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 0.5;
 
-  // X axis
   ctx.textAlign = 'center';
   const nTicks = 5;
   for (let i = 0; i <= nTicks; i++) {
@@ -371,8 +509,6 @@ function draw() {
     ctx.fillText(val.toFixed(0), px, oy + drawH + 16);
     ctx.beginPath(); ctx.moveTo(px, oy); ctx.lineTo(px, oy + drawH); ctx.stroke();
   }
-
-  // Y axis
   ctx.textAlign = 'right';
   for (let i = 0; i <= nTicks; i++) {
     const val = ymin + worldH * i / nTicks;
@@ -380,7 +516,8 @@ function draw() {
     ctx.fillText(val.toFixed(0), ox - 4, py + 4);
     ctx.beginPath(); ctx.moveTo(ox, py); ctx.lineTo(ox + drawW, py); ctx.stroke();
   }
-  // ── Path history ─────────────────────────────────────────────
+
+  // Path
   if (path.length > 1) {
     ctx.strokeStyle = 'rgba(255, 200, 80, 0.6)';
     ctx.lineWidth = 1.5;
@@ -393,17 +530,14 @@ function draw() {
     }
     ctx.stroke();
 
-    // Dots at each waypoint
     ctx.fillStyle = 'rgba(255, 200, 80, 0.9)';
     for (const pt of path) {
       const [px, py] = w2c(pt[0], pt[1]);
-      ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
     }
   }
 
-  // ── Planned path (cyan dashed) ──────────────────────────────
+  // Planned
   if (planned.length > 1) {
     ctx.strokeStyle = 'rgba(165, 94, 234, 0.7)';
     ctx.lineWidth = 2;
@@ -418,63 +552,48 @@ function draw() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Dots at planned waypoints
     ctx.fillStyle = 'rgba(165, 94, 234, 0.9)';
     for (const pt of planned) {
       const [px, py] = w2c(pt[0], pt[1]);
-      ctx.beginPath();
-      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
     }
   }
 
-  // ── ICP corrections (arrows from odom → corrected) ──────────
+  // ICP Vectors
   for (const c of icpCorr) {
     const [fx, fy] = w2c(c.from[0], c.from[1]);
     const [tx, ty] = w2c(c.to[0], c.to[1]);
     const len = Math.hypot(tx - fx, ty - fy);
     if (len < 2) continue;
-    // Arrow line
     ctx.strokeStyle = 'rgba(252, 92, 101, 0.7)';
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty); ctx.stroke();
-    // Arrowhead
     const angle = Math.atan2(ty - fy, tx - fx);
     ctx.fillStyle = 'rgba(252, 92, 101, 0.7)';
     ctx.beginPath();
     ctx.moveTo(tx, ty);
     ctx.lineTo(tx - 6 * Math.cos(angle - 0.5), ty - 6 * Math.sin(angle - 0.5));
     ctx.lineTo(tx - 6 * Math.cos(angle + 0.5), ty - 6 * Math.sin(angle + 0.5));
-    ctx.closePath();
-    ctx.fill();
-    // Hollow circle at odom position
+    ctx.closePath(); ctx.fill();
     ctx.strokeStyle = 'rgba(252, 92, 101, 0.5)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(fx, fy, 3, 0, Math.PI * 2); ctx.stroke();
   }
 
-  // ── Robot ────────────────────────────────────────────────────
+  // Robot
   const [rx, ry] = w2c(pose[0], pose[1]);
   const heading = pose[2] * Math.PI / 180;
   const sz = 12;
-
   ctx.save();
   ctx.translate(rx, ry);
   ctx.rotate(-heading);
-  ctx.beginPath();
-  ctx.moveTo(sz, 0);
-  ctx.lineTo(-sz * 0.7, -sz * 0.55);
-  ctx.lineTo(-sz * 0.3, 0);
-  ctx.lineTo(-sz * 0.7, sz * 0.55);
-  ctx.closePath();
-  ctx.fillStyle = '#e74c3c';
-  ctx.fill();
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 0.7, -sz * 0.55);
+  ctx.lineTo(-sz * 0.3, 0); ctx.lineTo(-sz * 0.7, sz * 0.55); ctx.closePath();
+  ctx.fillStyle = '#e74c3c'; ctx.fill(); ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5; ctx.stroke();
   ctx.restore();
 
-  // ── Target ───────────────────────────────────────────────────
+  // Target
   if (target) {
     const [tx, ty] = w2c(target[0], target[1]);
     ctx.strokeStyle = '#4ecca3';
@@ -484,34 +603,26 @@ function draw() {
     ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI*2); ctx.stroke();
   }
 
-  // ── Frontier clusters (orange dots) ───────────────────────────
+  // Frontiers
   for (const f of frontiers) {
-    // Draw frontier cells as small dots
     ctx.fillStyle = 'rgba(253, 121, 168, 0.5)';
     for (const cell of f.cells) {
       const [fx, fy] = w2c(cell[0], cell[1]);
       ctx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
     }
-    // Centroid marker
     const [cx, cy] = w2c(f.centroid[0], f.centroid[1]);
     ctx.fillStyle = '#fd79a8';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // Size label
-    ctx.fillStyle = '#fd79a8';
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(f.size, cx + 7, cy + 3);
+    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(f.size, cx + 6, cy + 3);
   }
 
-  // ── Explore goal (orange crosshair) ──────────────────────────
+  // Explore Goal
   if (exploreGoal) {
     const [ex, ey] = w2c(exploreGoal[0], exploreGoal[1]);
-    ctx.strokeStyle = '#ff6b81';
+    ctx.strokeStyle = '#66fcf1';
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(ex-10, ey); ctx.lineTo(ex+10, ey); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(ex, ey-10); ctx.lineTo(ex, ey+10); ctx.stroke();
@@ -533,94 +644,47 @@ draw();
 poll();
 
 function toggleExplore() {
-  if (exploring) {
-    fetch('/api/explore/stop', { method: 'POST' });
-  } else {
-    fetch('/api/explore', { method: 'POST' });
-  }
+  if (exploring) fetch('/api/explore/stop', { method: 'POST' });
+  else fetch('/api/explore', { method: 'POST' });
 }
 
-// ── PID Chart (Chart.js) ───────────────────────────────────────────
+// ── Chart.js ───────────────────────────────────────────────────────
 
 let pidChart = null;
-
 function drawPidCharts(pid) {
   const labels = pid.t.map(v => v.toFixed(2));
-
   const data = {
     labels,
     datasets: [
-      {
-        label: 'Left PWM',
-        data: pid.left_pwm,
-        borderColor: '#45aaf2',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        yAxisID: 'yPWM',
-      },
-      {
-        label: 'Right PWM',
-        data: pid.right_pwm,
-        borderColor: '#f7b731',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        yAxisID: 'yPWM',
-      },
-      {
-        label: 'Heading Error',
-        data: pid.heading_error,
-        borderColor: '#4ecca3',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        borderDash: [4, 2],
-        yAxisID: 'yErr',
-      },
+      { label: 'L PWM', data: pid.left_pwm, borderColor: '#45aaf2', borderWidth: 1.5, pointRadius: 0, yAxisID: 'yPWM' },
+      { label: 'R PWM', data: pid.right_pwm, borderColor: '#f7b731', borderWidth: 1.5, pointRadius: 0, yAxisID: 'yPWM' },
+      { label: 'Err °', data: pid.heading_error, borderColor: '#4ecca3', borderWidth: 1.5, pointRadius: 0, borderDash: [4, 2], yAxisID: 'yErr' },
     ],
   };
 
   const opts = {
-    responsive: true,
-    animation: false,
+    responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: {
-        labels: { color: '#888', font: { size: 10, family: 'monospace' }, boxWidth: 12 },
-      },
+      legend: { labels: { color: '#888', font: { size: 9 }, boxWidth: 8, padding: 4 } },
     },
     scales: {
-      x: {
-        title: { display: true, text: 'Time (s)', color: '#555', font: { size: 10 } },
-        ticks: { color: '#555', font: { size: 9 }, maxTicksLimit: 8 },
-        grid: { color: 'rgba(255,255,255,0.05)' },
-      },
+      x: { ticks: { color: '#555', font: { size: 8 }, maxTicksLimit: 5 }, grid: { display:false } },
       yPWM: {
-        type: 'linear',
-        position: 'left',
-        title: { display: true, text: 'PWM %', color: '#45aaf2', font: { size: 10 } },
-        ticks: { color: '#45aaf2', font: { size: 9 } },
+        type: 'linear', position: 'left', min: 0, max: 100,
+        ticks: { color: '#45aaf2', font: { size: 8 } },
         grid: { color: 'rgba(255,255,255,0.05)' },
-        min: 0,
       },
       yErr: {
-        type: 'linear',
-        position: 'right',
-        title: { display: true, text: 'Heading Err °', color: '#4ecca3', font: { size: 10 } },
-        ticks: { color: '#4ecca3', font: { size: 9 } },
+        type: 'linear', position: 'right',
+        ticks: { color: '#4ecca3', font: { size: 8 } },
         grid: { drawOnChartArea: false },
       },
     },
   };
 
-  if (pidChart) {
-    pidChart.data = data;
-    pidChart.update();
-  } else {
-    pidChart = new Chart(document.getElementById('pid-chart'), {
-      type: 'line',
-      data,
-      options: opts,
-    });
-  }
+  if (pidChart) { pidChart.data = data; pidChart.update(); }
+  else { pidChart = new Chart(document.getElementById('pid-chart'), { type: 'line', data, options: opts }); }
 }
 </script>
 </body>

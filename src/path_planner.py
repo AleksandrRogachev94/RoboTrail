@@ -291,7 +291,7 @@ def plan_and_smooth(
     goal_xy: tuple,
     robot_radius_cm: float = 9.0,
     obstacle_inflation: int = 7,
-    free_inflation: int = 4,
+    free_inflation: int = 5,
 ) -> list[tuple] | None:
     """Full path planning pipeline: A* → simplify → smooth → sample.
 
