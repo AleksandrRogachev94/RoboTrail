@@ -376,6 +376,12 @@ class SlamSystem:
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
+        if dist < self.ARRIVAL_THRESHOLD:
+            # Already at this frontier — just scan from here
+            print(f"Already within {self.ARRIVAL_THRESHOLD}cm, scanning in place")
+            self._scan_and_update()
+            return
+
         # Navigate to goal
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
