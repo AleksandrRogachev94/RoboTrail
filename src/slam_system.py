@@ -355,8 +355,13 @@ class SlamSystem:
             f"(sizes: {[len(c) for c in clusters[:5]]})"
         )
 
-        # Select best reachable goal
-        goal = select_goal(self.grid, clusters, self.pose)
+        # Select best reachable goal (skip goals within ARRIVAL_THRESHOLD)
+        goal = select_goal(
+            self.grid,
+            clusters,
+            self.pose,
+            min_distance_cm=self.ARRIVAL_THRESHOLD,
+        )
         if goal is None:
             if self.map_version <= 2:
                 print(
@@ -375,12 +380,6 @@ class SlamSystem:
         gx, gy = goal
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
-
-        if dist < self.ARRIVAL_THRESHOLD:
-            # Already at this frontier — just scan from here
-            print(f"Already within {self.ARRIVAL_THRESHOLD}cm, scanning in place")
-            self._scan_and_update()
-            return
 
         # Navigate to goal
         self.explore_goal = goal

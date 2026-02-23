@@ -87,11 +87,16 @@ def select_goal(
     grid: OccupancyGrid,
     clusters: list[list[tuple[int, int]]],
     robot_pose: tuple[float, float, float],
+    min_distance_cm: float = 0,
 ) -> tuple[float, float] | None:
     """Pick the best frontier goal from detected clusters.
 
     Scores each cluster by path distance only (turning is cheap).
     The goal is the closest point in the cluster to the robot.
+
+    Args:
+        min_distance_cm: Skip goals closer than this (avoids picking
+                         frontiers the robot is already sitting on).
 
     Returns:
         (goal_x, goal_y) in world cm, or None if nothing reachable.
@@ -125,7 +130,7 @@ def select_goal(
                 min_cluster_dist = d
                 gx, gy = wx, wy
 
-        if gx is None or min_cluster_dist < 1.0:
+        if gx is None or min_cluster_dist < max(1.0, min_distance_cm):
             continue
 
         # Verify goal is on traversable space
