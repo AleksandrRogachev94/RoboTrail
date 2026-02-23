@@ -26,9 +26,17 @@ from robot.config import (
     L_MAX,
     L_MIN,
     L_OCC,
+    OBSTACLE_PADDING_CM,
+    ROBOT_RADIUS_CM,
     TOF_OFFSET_X,
     TOF_OFFSET_Y,
 )
+
+# Default inflation values — shared with path_planner.py
+_OBSTACLE_INFLATION = math.ceil(
+    (ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM) / GRID_RESOLUTION
+)
+_FREE_INFLATION = math.ceil(OBSTACLE_PADDING_CM / GRID_RESOLUTION)
 
 
 def scan_to_world(scan_points: np.ndarray, robot_pose: tuple):
@@ -253,7 +261,9 @@ class OccupancyGrid:
     # ── Traversability ─────────────────────────────────────────────────
 
     def get_traversability_grid(
-        self, obstacle_inflation: int = 7, free_inflation: int = 5
+        self,
+        obstacle_inflation: int = _OBSTACLE_INFLATION,
+        free_inflation: int = _FREE_INFLATION,
     ) -> np.ndarray:
         """Build traversability mask with dual inflation.
 
