@@ -119,8 +119,6 @@ def main():
     companion_pos = companion_enc.position
     tune_ema = 0.0
     companion_ema = 0.0
-    last_time = time.monotonic()
-    start_time = last_time
     duration = RAMP_TIME + CRUISE_TIME
 
     print(f"\nTuning {args.motor} motor")
@@ -129,6 +127,9 @@ def main():
     print(f"  Companion: Kp={PID_KP}, Ki={PID_KI}, Kd={PID_KD}")
     print("\nPlace robot on floor, press Enter to start...")
     input()
+
+    last_time = time.monotonic()
+    start_time = last_time
 
     try:
         while (time.monotonic() - start_time) < duration:
