@@ -9,6 +9,14 @@ import math
 import numpy as np
 
 from occupancy_grid import OccupancyGrid
+from robot.config import GRID_RESOLUTION, OBSTACLE_PADDING_CM, ROBOT_RADIUS_CM
+
+# Obstacle inflation derived from robot dimensions:
+#   = ceil((robot_radius + safety_padding) / cell_size)
+_OBSTACLE_INFLATION = math.ceil(
+    (ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM) / GRID_RESOLUTION
+)
+_FREE_INFLATION = math.ceil(OBSTACLE_PADDING_CM / GRID_RESOLUTION)
 
 # =============================================================================
 # A* Search
@@ -155,17 +163,20 @@ def plan_path(
     grid,  # OccupancyGrid instance
     start_xy: tuple,
     goal_xy: tuple,
-    obstacle_inflation: int = 7,
-    free_inflation: int = 5,
+    obstacle_inflation: int = _OBSTACLE_INFLATION,
+    free_inflation: int = _FREE_INFLATION,
 ) -> list[tuple] | None:
     """Path planning pipeline: A* → simplify → world coordinates.
+
+    Inflation defaults are derived from ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM
+    in config.py and can be overridden for testing.
 
     Args:
         grid: OccupancyGrid instance.
         start_xy: (x, y) start position in world cm.
         goal_xy: (x, y) goal position in world cm.
-        obstacle_inflation: Cells to inflate obstacles by.
-        free_inflation: Cells to inflate free space by.
+        obstacle_inflation: Cells to inflate obstacles by (default from config).
+        free_inflation: Cells to inflate free space by (default from config).
 
     Returns:
         List of (x, y) world-coordinate waypoints, or None if no path.

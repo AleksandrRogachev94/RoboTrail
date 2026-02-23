@@ -4,8 +4,8 @@
 # Physical Dimensions (measure your robot)
 # =============================================================================
 WHEEL_DIAMETER_CM = 4  # Outer diameter of drive wheels
-TRACK_WIDTH_CM = 14.5  # Distance between wheel centers (measure on new chassis)
-
+ROBOT_RADIUS_CM = 7.75  # Physical robot radius (155mm diameter / 2)
+OBSTACLE_PADDING_CM = 5  # Safety margin added on top of robot radius
 # =============================================================================
 # DC Motor Pin Configuration (BCM GPIO numbers) - N20 + TB6612FNG
 # =============================================================================
