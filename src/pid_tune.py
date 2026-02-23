@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""PID tuning script for a single DC motor velocity controller.
+"""PID tuning script for DC motor velocity controller.
 
-Runs the motor being tuned with its own PID + feedforward (exactly as
-DCMotorPID does in normal operation).  The companion motor runs a separate
-independent PID loop at the same target velocity so that the chassis load
-is realistic (both wheels on the ground, both spinning).
+Ramps target velocity up (like the real velocity profile), cruises,
+then ramps down — so the PID is tested under realistic conditions.
+
+Both motors run simultaneously with their own PID+feedforward loops
+for realistic chassis load.
 
 Run on Pi:
     python3 pid_tune.py --motor right --kp 0.15
@@ -12,11 +13,11 @@ Run on Pi:
 
 Tuning procedure:
   1. Place robot on the floor it will normally navigate.
-  2. Start with kp only (ki=0, kd=0).  Increase kp until you see fast
-     rise with tolerable oscillation (~20% overshoot is fine as a start).
-  3. Add ki (try 0.1–0.5) to eliminate steady-state error.
-  4. Add kd only if there is persistent oscillation after step 3.
-  5. Update PID_KP / PID_KI / PID_KD in config.py when satisfied.
+  2. Start with kp only (ki=0, kd=0).  Look at the cruise phase —
+     velocity should track the red target line closely (within 30 ticks/s).
+  3. Add small ki (0.01–0.05) to eliminate any steady-state offset
+     visible in the cruise phase.
+  4. Update PID_KP / PID_KI / PID_KD in config.py when satisfied.
 """
 
 import argparse
@@ -41,11 +42,14 @@ from robot.dc_motor import DCMotor
 from robot.pid import PID
 from sensors.encoder import Encoder, list_encoder_devices
 
-# Config
-TARGET_VELOCITY = 700  # ticks/sec — match MAX_FORWARD_VELOCITY
+# ── Config ────────────────────────────────────────────────────────────
+CRUISE_VELOCITY = 700  # ticks/sec — match MAX_FORWARD_VELOCITY
 DT = 0.02  # 50 Hz — match real control loop
-DURATION = 5.0  # seconds
 EMA_ALPHA = 0.2  # Must match DCMotorPID._EMA_ALPHA
+
+# Profile timing (total = RAMP + CRUISE)
+RAMP_TIME = 1.0  # seconds to ramp 0→cruise
+CRUISE_TIME = 4.0  # seconds at full speed
 
 
 def feedforward(target_velocity: float) -> float:
@@ -56,13 +60,20 @@ def feedforward(target_velocity: float) -> float:
     return sign * (FEEDFORWARD_OFFSET + FEEDFORWARD_SLOPE * abs(target_velocity))
 
 
-def run_motor(motor, enc, pid, last_pos, last_time, ema_vel, dt):
-    """One PID+feedforward iteration. Returns (new_ema_vel, pwm_output)."""
+def get_target(t: float) -> float:
+    """Trapezoidal velocity profile: ramp up → cruise."""
+    if t < RAMP_TIME:
+        return CRUISE_VELOCITY * (t / RAMP_TIME)
+    return CRUISE_VELOCITY
+
+
+def run_motor(motor, enc, pid, last_pos, ema_vel, dt, target):
+    """One PID+feedforward iteration."""
     pos = enc.position
-    raw_vel = (pos - last_pos) / dt
+    raw_vel = (pos - last_pos) / dt if dt > 0 else 0
     ema = EMA_ALPHA * raw_vel + (1 - EMA_ALPHA) * ema_vel
-    ff = feedforward(TARGET_VELOCITY)
-    error = TARGET_VELOCITY - ema
+    ff = feedforward(target)
+    error = target - ema
     correction = pid.update(error, dt)
     output = max(-100, min(100, ff + correction))
     motor.set_speed(output)
@@ -71,15 +82,13 @@ def run_motor(motor, enc, pid, last_pos, last_time, ema_vel, dt):
 
 def main():
     parser = argparse.ArgumentParser(description="PID tuning — wheel velocity")
-    parser.add_argument(
-        "--motor", choices=["left", "right"], required=True, help="Motor to tune"
-    )
+    parser.add_argument("--motor", choices=["left", "right"], required=True)
     parser.add_argument("--kp", type=float, default=PID_KP)
     parser.add_argument("--ki", type=float, default=PID_KI)
     parser.add_argument("--kd", type=float, default=PID_KD)
     args = parser.parse_args()
 
-    # ── Hardware setup ────────────────────────────────────────────────
+    # ── Hardware ──────────────────────────────────────────────────────
     h = lgpio.gpiochip_open(4)
     left_motor = DCMotor(h, DC_LEFT_PWM, DC_LEFT_IN1, DC_LEFT_IN2)
     right_motor = DCMotor(h, DC_RIGHT_PWM, DC_RIGHT_IN1, DC_RIGHT_IN2)
@@ -93,7 +102,6 @@ def main():
     right_enc = Encoder(encoders[0][0])
     left_enc = Encoder(encoders[1][0], reversed=True)
 
-    # ── Select tune/companion ─────────────────────────────────────────
     if args.motor == "right":
         tune_motor, tune_enc = right_motor, right_enc
         companion_motor, companion_enc = left_motor, left_enc
@@ -102,10 +110,10 @@ def main():
         companion_motor, companion_enc = right_motor, right_enc
 
     tune_pid = PID(kp=args.kp, ki=args.ki, kd=args.kd)
-    companion_pid = PID(kp=PID_KP, ki=PID_KI, kd=PID_KD)  # config gains
+    companion_pid = PID(kp=PID_KP, ki=PID_KI, kd=PID_KD)
 
-    # ── Data collection ───────────────────────────────────────────────
-    times, tune_vels, companion_vels, pwms = [], [], [], []
+    # ── Data ──────────────────────────────────────────────────────────
+    times, target_list, tune_vels, companion_vels, pwms = [], [], [], [], []
 
     tune_pos = tune_enc.position
     companion_pos = companion_enc.position
@@ -113,44 +121,47 @@ def main():
     companion_ema = 0.0
     last_time = time.monotonic()
     start_time = last_time
+    duration = RAMP_TIME + CRUISE_TIME
 
     print(f"\nTuning {args.motor} motor")
     print(f"  Kp={args.kp}, Ki={args.ki}, Kd={args.kd}")
-    print(f"  Target: {TARGET_VELOCITY} ticks/sec")
-    print(f"  Companion uses config gains: Kp={PID_KP}, Ki={PID_KI}, Kd={PID_KD}")
-    print(f"  EMA alpha: {EMA_ALPHA}  (matches DCMotorPID)")
-    print("\nPlace robot on floor, then press Enter to start...")
+    print(f"  Profile: ramp {RAMP_TIME}s -> cruise {CRUISE_TIME}s at {CRUISE_VELOCITY}")
+    print(f"  Companion: Kp={PID_KP}, Ki={PID_KI}, Kd={PID_KD}")
+    print("\nPlace robot on floor, press Enter to start...")
     input()
 
     try:
-        while (time.monotonic() - start_time) < DURATION:
+        while (time.monotonic() - start_time) < duration:
             now = time.monotonic()
             dt_actual = now - last_time
             if dt_actual <= 0:
                 dt_actual = DT
 
+            t = now - start_time
+            target = get_target(t)
+
             tune_pos, tune_ema, pwm = run_motor(
-                tune_motor, tune_enc, tune_pid, tune_pos, last_time, tune_ema, dt_actual
+                tune_motor, tune_enc, tune_pid, tune_pos, tune_ema, dt_actual, target
             )
             companion_pos, companion_ema, _ = run_motor(
                 companion_motor,
                 companion_enc,
                 companion_pid,
                 companion_pos,
-                last_time,
                 companion_ema,
                 dt_actual,
+                target,
             )
 
-            t = now - start_time
             times.append(t)
+            target_list.append(target)
             tune_vels.append(tune_ema)
             companion_vels.append(companion_ema)
             pwms.append(pwm)
 
             print(
-                f"t={t:4.2f}  tune={tune_ema:6.0f}  companion={companion_ema:6.0f}"
-                f"  err={TARGET_VELOCITY - tune_ema:+6.0f}  pwm={pwm:5.1f}"
+                f"t={t:4.2f}  target={target:5.0f}  tune={tune_ema:6.0f}"
+                f"  err={target - tune_ema:+6.0f}  pwm={pwm:5.1f}"
             )
 
             last_time = now
@@ -178,7 +189,7 @@ def main():
 
         ax1.plot(times, tune_vels, "b-", label=f"{args.motor} (tuning)")
         ax1.plot(times, companion_vels, "g-", alpha=0.5, label="companion")
-        ax1.axhline(y=TARGET_VELOCITY, color="r", linestyle="--", label="target")
+        ax1.plot(times, target_list, "r--", label="target")
         ax1.set_ylabel("Velocity (ticks/s)")
         ax1.set_title(
             f"{args.motor.capitalize()} — Kp={args.kp}, Ki={args.ki}, Kd={args.kd}"
