@@ -25,7 +25,7 @@ DC_PWM_FREQ = 1000
 # =============================================================================
 # DC Motor Movement Constants
 # =============================================================================
-TICKS_PER_CM = 61.5  # Calibrate with real measurement
+TICKS_PER_CM = 45  # Calibrate with real measurement
 MAX_FORWARD_VELOCITY = 700  # ticks/sec max wheel speed
 DT = 0.02  # 50Hz control loop
 
@@ -43,14 +43,14 @@ TURN_PID_FINE_GAIN = 0.1  # 10% of normal heading PID for fine correction
 # PID Control Constants (Tuned Ziegler-Nichols)
 # =============================================================================
 # Velocity PID (per motor) - tuned via pid_tune.py
-PID_KP = 0.15
+PID_KP = 0.3
 PID_KI = 0.1
 PID_KD = 0.0
 
 # Feedforward: PWM = OFFSET + SLOPE * velocity
 # Calibrated via calibrate_feedforward.py
-FEEDFORWARD_OFFSET = 38.0  # Dead zone PWM %
-FEEDFORWARD_SLOPE = 0.067  # Measured from 50%→90% PWM tests
+FEEDFORWARD_OFFSET = 25.0  # Dead zone PWM %
+FEEDFORWARD_SLOPE = 0.0679  # Measured from 50%→90% PWM tests
 
 # Heading PID (robot level) - TODO: Tune for your robot
 HEADING_PID_KP = 30.0  # degrees error → velocity differential
