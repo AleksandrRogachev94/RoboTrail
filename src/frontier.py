@@ -2,14 +2,6 @@
 
 Frontiers are boundaries between traversable and unknown space.
 The robot explores by driving toward frontier goals, mapping as it goes.
-
-Design:
-  - Detection uses the traversability grid (inflated free space) to avoid
-    fragmented frontiers between sparse scan rays.
-  - Standoff: target a point pulled back from the frontier centroid so the
-    robot has room to arc-maneuver at the destination.
-  - Forward bias: penalize frontiers behind the robot to avoid costly U-turns.
-  - Commitment: pick one goal per iteration; re-evaluate only on arrival.
 """
 
 import math
@@ -24,9 +16,6 @@ from robot.config import GRID_RESOLUTION
 # ── Constants ──────────────────────────────────────────────────────────
 
 MIN_CLUSTER_SIZE = 30  # Filter small interior holes; real frontiers are 100+ cells
-STANDOFF_CM = 15.0  # Pull goal back from frontier edge (arc room)
-MIN_FRONTIER_DIST = 15.0 
-HEADING_PENALTY_WEIGHT = 0.8  # cm per degree — strongly prefer forward-facing goals
 
 # 8-connected neighbors for adjacency checks and BFS
 _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
@@ -101,8 +90,8 @@ def select_goal(
 ) -> tuple[float, float] | None:
     """Pick the best frontier goal from detected clusters.
 
-    Scores each cluster by: path_distance + heading_penalty.
-    The goal point is pulled back from the centroid by STANDOFF_CM.
+    Scores each cluster by path distance only (turning is cheap).
+    The goal is the closest point in the cluster to the robot.
 
     Returns:
         (goal_x, goal_y) in world cm, or None if nothing reachable.
@@ -127,54 +116,34 @@ def select_goal(
 
     for cluster in clusters:
         # Find the point in the cluster closest to the robot
-        cx, cy = None, None
+        gx, gy = None, None
         min_cluster_dist = float("inf")
         for r, c in cluster:
             wx, wy = grid.grid_to_world(r, c)
             d = math.hypot(wx - rx, wy - ry)
             if d < min_cluster_dist:
                 min_cluster_dist = d
-                cx, cy = wx, wy
+                gx, gy = wx, wy
 
-        # Pull goal toward robot by STANDOFF_CM
-        dx, dy = cx - rx, cy - ry
-        dist = math.hypot(dx, dy)
-        if dist < 1.0:
+        if gx is None or min_cluster_dist < 1.0:
             continue
-
-        if dist > STANDOFF_CM:
-            ratio = (dist - STANDOFF_CM) / dist
-            gx, gy = rx + dx * ratio, ry + dy * ratio
-        else:
-            gx, gy = cx, cy
 
         # Verify goal is on traversable space
         goal_rc = grid.world_to_grid(gx, gy)
         gr, gc = goal_rc
         if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
-            # Fall back to the edge point if standoff point is blocked
-            goal_rc = grid.world_to_grid(cx, cy)
-            gr, gc = goal_rc
-            if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
-                continue
-            gx, gy = cx, cy
+            continue
 
-        # Score = path distance + heading penalty
+        # Score = path distance only (turning in place is cheap)
         path = a_star(traversable, start_rc, goal_rc)
         if path is None:
             continue
 
-        path_dist = len(path) * GRID_RESOLUTION
-        angle_to_goal = math.degrees(math.atan2(dy, dx))
-        heading_diff = abs((angle_to_goal - heading_deg + 180) % 360 - 180)
-        score = path_dist + heading_diff * HEADING_PENALTY_WEIGHT
+        score = len(path) * GRID_RESOLUTION
 
         if score < best_score:
             best_score = score
             best_goal = (gx, gy)
-
-    if best_goal and math.hypot(best_goal[0] - rx, best_goal[1] - ry) < MIN_FRONTIER_DIST:
-        return None  # force re-evaluation rather than targeting something we're on top of
 
     return best_goal
 

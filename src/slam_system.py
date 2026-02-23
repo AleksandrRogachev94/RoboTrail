@@ -18,7 +18,7 @@ import numpy as np
 from frontier import find_frontiers, get_frontier_viz_data, select_goal
 from icp import icp
 from occupancy_grid import OccupancyGrid, scan_to_world
-from path_planner import plan_and_smooth
+from path_planner import plan_path
 from robot.drive_dc import RobotDC
 from scanner import Scanner
 
@@ -53,6 +53,11 @@ class SlamSystem:
         self._running = False
         self._thread = None
 
+    # ── Exploration constants ──────────────────────────────────────────
+    BOOTSTRAP_DRIVE_CM = 15.0  # Forward drive when map is too young for frontiers
+    ARRIVAL_THRESHOLD = 10.0  # cm — close enough to target
+    SCAN_INTERVAL_CM = 40.0  # Drive at most this far before scanning
+
     def start(self):
         """Start background control loop."""
         self._running = True
@@ -78,14 +83,7 @@ class SlamSystem:
         return True
 
     def get_map_data(self):
-        """Return cropped map data for the frontend.
-
-        Returns dict with:
-          grid: 2D list of probabilities (0=free, 1=occupied)
-          traversable: 2D list of booleans (True=safe to drive)
-          bounds: [x_min, x_max, y_min, y_max] in cm
-          rows, cols: dimensions
-        """
+        """Return cropped map data for the frontend."""
         prob_map = self.grid.get_probability_map()
         r0, r1, c0, c1 = self.grid._get_data_bounds(padding=10)
         cropped = prob_map[r0 : r1 + 1, c0 : c1 + 1]
@@ -146,18 +144,17 @@ class SlamSystem:
     def _move_scan_update(self, target):
         """Navigate to target using receding horizon path planning.
 
-        At each step: plan path → follow first few waypoints → scan → repeat.
-        Re-plans from current position every iteration to handle new obstacles.
+        At each step: plan path → drive up to SCAN_INTERVAL_CM → scan →
+        repeat. Re-plans from current position every iteration to handle
+        new obstacles discovered by scanning.
         """
         tx, ty = target
-        ARRIVAL_THRESHOLD = 10.0  # cm — close enough to target
         MAX_STEPS = 50  # safety limit
-        MAX_WPS_PER_MOVE = 3  # follow this many waypoints before scanning
 
         for step_i in range(MAX_STEPS):
             # Check if we've arrived
             dist_to_goal = math.hypot(tx - self.pose[0], ty - self.pose[1])
-            if dist_to_goal < ARRIVAL_THRESHOLD:
+            if dist_to_goal < self.ARRIVAL_THRESHOLD:
                 self.message = f"Arrived at ({tx:.0f}, {ty:.0f})!"
                 print(f"Arrived at target (dist={dist_to_goal:.1f}cm)")
                 break
@@ -166,7 +163,7 @@ class SlamSystem:
             self.state = "PLANNING"
             self.message = f"Planning path to ({tx:.0f}, {ty:.0f})..."
             start_xy = (self.pose[0], self.pose[1])
-            waypoints = plan_and_smooth(self.grid, start_xy, (tx, ty))
+            waypoints = plan_path(self.grid, start_xy, (tx, ty))
 
             if waypoints is None or len(waypoints) < 2:
                 self.message = "No path found!"
@@ -176,48 +173,22 @@ class SlamSystem:
                 )
                 break
 
-            # On first step: check if path starts with a sharp turn → back up
-            if step_i == 0 and len(waypoints) >= 2:
-                wp1x, wp1y = waypoints[1]
-                angle_to_wp1 = math.degrees(
-                    math.atan2(wp1y - self.pose[1], wp1x - self.pose[0])
-                )
-                wp1_diff = abs((angle_to_wp1 - self.pose[2] + 180) % 360 - 180)
-                if wp1_diff > self.SHARP_TURN_DEG:
-                    left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
-                    right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
-
-                    if left_dist > right_dist + 5.0:
-                        print(
-                            f"Sharp first waypoint ({wp1_diff:.0f}°) — Left clearer, turning nose left"
-                        )
-                        self._back_up_arc(-25.0, -15.0)
-                    else:
-                        # Default to favoring the right side if equal or right is clearer
-                        print(
-                            f"Sharp first waypoint ({wp1_diff:.0f}°) — Right clearer (or tie), turning nose right"
-                        )
-                        self._back_up_arc(25.0, -15.0)
-                    continue  # re-plan from new position
-
             # Store full planned path for UI display
             self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
 
-            # Follow a chunk of waypoints (include start position + next N)
-            chunk = waypoints[: MAX_WPS_PER_MOVE + 1]
             print(
-                f"Step {step_i + 1}: planned {len(waypoints)} waypoints, "
-                f"following {len(chunk) - 1}"
+                f"Step {step_i + 1}: {len(waypoints) - 1} waypoints, "
+                f"driving <={self.SCAN_INTERVAL_CM}cm before scan"
             )
 
-            # Execute movement along the path chunk
+            # Drive up to SCAN_INTERVAL_CM then stop for scan
             self.state = "MOVING"
             self.message = "Calibrating gyro..."
             try:
                 self.robot.imu.calibrate_gyro(samples=100)
-                self.message = f"Following path ({len(chunk) - 1} waypoints)..."
+                self.message = f"Driving (<={self.SCAN_INTERVAL_CM:.0f}cm segment)..."
                 self.robot.history = []
-                self.robot.follow_path(chunk)
+                self.robot.follow_path(waypoints, max_distance_cm=self.SCAN_INTERVAL_CM)
                 self.pose = self.robot.get_pose()
                 self.path_history.append((self.pose[0], self.pose[1]))
 
@@ -275,7 +246,6 @@ class SlamSystem:
                 map_points = self.grid.get_occupied_points()
 
                 # Only match against nearby map points (within 200cm of robot)
-                # Prevents cross-wall matches when pose estimate is slightly off
                 if len(map_points) > 0:
                     dist_to_robot = np.linalg.norm(
                         map_points - np.array([pose[0], pose[1]]), axis=1
@@ -293,7 +263,6 @@ class SlamSystem:
                         dy = corr_pos[1] - pose[1]
 
                         # Sanity cap: reject implausibly large corrections
-                        # These are almost always bad matches, not real drift
                         correction_dist = math.hypot(dx, dy)
                         if correction_dist > 10.0 or abs(corr_angle) > 10.0:
                             self.icp_result = {
@@ -342,13 +311,6 @@ class SlamSystem:
             traceback.print_exc()
 
     # ── Exploration ─────────────────────────────────────────────────
-
-    # Constants for explore loop
-    BOOTSTRAP_DRIVE_CM = 15.0  # Forward drive when map is too young for frontiers
-    MIN_FRONTIER_DIST = 15.0  # Below this, drive forward instead of path-planning
-    SHARP_TURN_DEG = 80.0  # Back up first if heading change exceeds this
-    STRONGLY_BEHIND_DEG = 150.0  # Turn in place first if goal is this far off heading
-    BACKUP_CM = 20.0  # How far to back up before a sharp turn
 
     def explore(self):
         """Start autonomous frontier exploration."""
@@ -414,53 +376,9 @@ class SlamSystem:
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
-        if dist < self.MIN_FRONTIER_DIST:
-            print(f"Frontier too close ({dist:.0f}cm) — driving forward to get better angle")
-            heading_rad = math.radians(self.pose[2])
-            check_x = self.pose[0] + self.BOOTSTRAP_DRIVE_CM * math.cos(heading_rad)
-            check_y = self.pose[1] + self.BOOTSTRAP_DRIVE_CM * math.sin(heading_rad)
-            cr, cc = self.grid.world_to_grid(check_x, check_y)
-            traversable = self.grid.get_traversability_grid()
-            wall_ahead = (
-                0 <= cr < traversable.shape[0]
-                and 0 <= cc < traversable.shape[1]
-                and not traversable[cr, cc]
-            )
-            if wall_ahead:
-                left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
-                right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
-                if left_dist > right_dist + 5.0:
-                    print("Wall ahead and frontier too close — arcing left")
-                    self._back_up_arc(-25.0, -15.0)
-                else:
-                    print("Wall ahead and frontier too close — arcing right")
-                    self._back_up_arc(25.0, -15.0)
-            else:
-                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
-            return
-
         # Navigate to goal
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
-
-        # Back up if goal is nearly behind us — creates room for the arc
-        angle = math.degrees(math.atan2(gy - self.pose[1], gx - self.pose[0]))
-        heading_diff = abs((angle - self.pose[2] + 180) % 360 - 180)
-        if heading_diff > self.STRONGLY_BEHIND_DEG:
-            left_dist = self._get_clearance(self.pose[2] + 90, 40.0)
-            right_dist = self._get_clearance(self.pose[2] - 90, 40.0)
-
-            if left_dist > right_dist + 5.0:
-                print(
-                    f"Goal behind ({heading_diff:.0f}°) — Left clearer, turning nose left"
-                )
-                self._back_up_arc(-25.0, -20.0)
-            else:
-                # Default to favoring the right side if equal or right is clearer
-                print(
-                    f"Goal behind ({heading_diff:.0f}°) — Right clearer (or tie), turning nose right"
-                )
-                self._back_up_arc(25.0, -20.0)
         self._move_scan_update(goal)
         self.explore_goal = None
 
@@ -476,7 +394,7 @@ class SlamSystem:
             and 0 <= cc < traversable.shape[1]
             and not traversable[cr, cc]
         ):
-            print("Wall ahead — skipping forward drive")
+            print("Wall ahead — scanning instead")
             self._scan_and_update()
             return
 
@@ -494,39 +412,3 @@ class SlamSystem:
             self._exploring = False
             return
         self._scan_and_update()
-
-    def _back_up_arc(self, radius_cm: float, arc_length_cm: float):
-        """Back up in an arc to swing the nose into free space."""
-        try:
-            self.state = "MOVING"
-            self.robot.imu.calibrate_gyro(samples=100)
-            self.robot.history = []
-            self.robot.arc(radius_cm, arc_length_cm)
-            self.pose = self.robot.get_pose()
-            self.path_history.append((self.pose[0], self.pose[1]))
-        except Exception as e:
-            print(f"Backup arc failed: {e}")
-
-    def _get_clearance(self, angle_deg: float, max_dist_cm: float = 40.0) -> float:
-        """Raycast on the grid to find free distance along 'angle_deg'."""
-        angle_rad = math.radians(angle_deg)
-        cos_a = math.cos(angle_rad)
-        sin_a = math.sin(angle_rad)
-
-        step_cm = 2.0
-        dist = 0.0
-        grid_data = self.grid.grid
-        rows, cols = grid_data.shape
-
-        while dist < max_dist_cm:
-            cx = self.pose[0] + dist * cos_a
-            cy = self.pose[1] + dist * sin_a
-            r, c = self.grid.world_to_grid(cx, cy)
-
-            if not (0 <= r < rows and 0 <= c < cols):
-                break
-            if grid_data[r, c] >= 0.5:  # Obstacle or Unknown
-                break
-            dist += step_cm
-
-        return dist

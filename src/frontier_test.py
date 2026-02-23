@@ -196,9 +196,9 @@ if __name__ == "__main__":
 
     # Viz data (for web UI)
     print("\n── Viz data ──")
-    viz = get_frontier_viz_data(grid, clusters)
+    viz = get_frontier_viz_data(grid, clusters, robot_pose)
     for i, v in enumerate(viz):
-        print(f"  Cluster {i}: centroid={v['centroid']}, size={v['size']}")
+        print(f"  Cluster {i}: edge_pt={v['edge_pt']}, size={v['size']}")
 
     # Plot
     print()

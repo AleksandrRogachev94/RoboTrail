@@ -3,8 +3,8 @@
 
 Use this to:
 1. Test forward/backward movement
-2. Test turning
-3. Calibrate TICKS_PER_CM
+2. Test turning in place
+3. Test move-to-point
 4. View PID performance plots
 
 Run on Pi: python3 drive_dc_test.py
@@ -82,7 +82,7 @@ def main():
 
     try:
         # Test 1: Forward 30cm
-        print("\n=== Test: Forward 30cm ===")
+        print("\n=== Test 1: Forward 30cm ===")
         print("Place robot at a marked starting point.")
         input("Press Enter to start...")
 
@@ -104,7 +104,7 @@ def main():
             print(f"New TICKS_PER_CM = {62.5 * correction:.1f}")
 
         # Test 2: Turn 90 degrees
-        print("\n=== Test: Turn 90 degrees CCW ===")
+        print("\n=== Test 2: Turn 90° CCW ===")
         input("Press Enter to turn...")
 
         robot.history.clear()
@@ -116,20 +116,34 @@ def main():
         )
         plot_history(robot.history, "Turn 90 degrees", "turn_90deg.png")
 
-        # Test 3: Arc motion (quarter circle)
-        print("\n=== Test: Arc - Quarter circle left, 30cm radius ===")
-        print("Robot should curve left ~90 degrees over ~47cm arc length")
-        input("Press Enter to start arc...")
+        # Test 3: Turn 180 degrees
+        print("\n=== Test 3: Turn 180° CW ===")
+        input("Press Enter to turn...")
 
         robot.history.clear()
-        robot.arc(radius_cm=30, arc_length_cm=47)  # π*30/2 ≈ 47cm for quarter circle
+        robot.turn(-180)
 
         x, y, heading = robot.get_pose()
         print(
             f"Done! Calculated pose: x={x:.1f}cm, y={y:.1f}cm, heading={heading:.1f}°"
         )
-        print("Expected for quarter circle left: x≈30cm, y≈30cm, heading≈90°")
-        plot_history(robot.history, "Arc: 30cm radius, quarter circle", "arc_30cm.png")
+        plot_history(robot.history, "Turn 180 degrees CW", "turn_180deg.png")
+
+        # Test 4: Move to point
+        print("\n=== Test 4: Move to point (30, 30) ===")
+        print("Robot should turn ~45° then drive ~42cm")
+        input("Press Enter to start...")
+
+        robot.reset_pose()
+        robot.history.clear()
+        robot.move_to(30, 30)
+
+        x, y, heading = robot.get_pose()
+        print(
+            f"Done! Calculated pose: x={x:.1f}cm, y={y:.1f}cm, heading={heading:.1f}°"
+        )
+        print("Expected: x≈30cm, y≈30cm, heading≈45°")
+        plot_history(robot.history, "Move to (30, 30)", "move_to_30_30.png")
 
     except KeyboardInterrupt:
         print("\nInterrupted")

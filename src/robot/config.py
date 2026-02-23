@@ -1,19 +1,10 @@
-"""Robot calibration constants and pin configuration.
-
-Update STEPS_PER_CM and STEPS_PER_DEGREE after running calibration.
-"""
+"""Robot calibration constants and pin configuration."""
 
 # =============================================================================
 # Physical Dimensions (measure your robot)
 # =============================================================================
-WHEEL_DIAMETER_CM = 4  # Outer diameter of drive wheels WITH TRACKS
-TRACK_WIDTH_CM = 17  # Distance between wheel centers (for pivot turns). Real value is about 14.5, increasing it to compensate for persistent slip
-
-# =============================================================================
-# Stepper Motor Pin Configuration (BCM GPIO numbers) - 28BYJ-48 + ULN2003
-# =============================================================================
-LEFT_STEPPER_PINS = [17, 27, 22, 23]  # IN1, IN2, IN3, IN4
-RIGHT_STEPPER_PINS = [5, 6, 13, 19]  # IN1, IN2, IN3, IN4
+WHEEL_DIAMETER_CM = 4  # Outer diameter of drive wheels
+TRACK_WIDTH_CM = 14.5  # Distance between wheel centers (measure on new chassis)
 
 # =============================================================================
 # DC Motor Pin Configuration (BCM GPIO numbers) - N20 + TB6612FNG
@@ -32,27 +23,21 @@ DC_LEFT_IN2 = 24  # Swapped from 25
 DC_PWM_FREQ = 1000
 
 # =============================================================================
-# Calibrated Movement Constants
-# Run calibrate_motors.py to measure these values for your robot.
-# =============================================================================
-
-# Steps required to move 1 cm forward
-STEPS_PER_CM = 365.7
-
-# Steps required to rotate 1 degree (pivot turn)
-STEPS_PER_DEGREE = 62.0  # TODO: Calibrate with actual measurement
-
-# =============================================================================
 # DC Motor Movement Constants
 # =============================================================================
 TICKS_PER_CM = 61.5  # Calibrate with real measurement
-DEFAULT_VELOCITY = 700  # ticks/sec
+MAX_FORWARD_VELOCITY = 700  # ticks/sec max wheel speed
 DT = 0.02  # 50Hz control loop
 
-# =============================================================================
-# Motor Timing
-# =============================================================================
-DEFAULT_STEP_DELAY = 0.001  # Seconds between steps (1ms = smooth movement)
+# Forward motion profile
+RAMP_DISTANCE_CM = 8.0  # Ramp up/down over this distance
+MIN_SPEED_FACTOR = 0.3  # Minimum speed during ramp (30% of target)
+
+# Turn profile
+RAMP_ANGLE_DEG = 20.0  # Ramp up/down over this angle
+MAX_TURN_VELOCITY = 500  # ticks/sec max wheel speed during turns
+MIN_TURN_FACTOR = 0.2  # Minimum speed during turn ramp (20%)
+TURN_PID_FINE_GAIN = 0.1  # 10% of normal heading PID for fine correction
 
 # =============================================================================
 # PID Control Constants (Tuned Ziegler-Nichols)
@@ -76,7 +61,7 @@ HEADING_PID_KD = 0.0
 # Servo/ToF Calibration
 # =============================================================================
 # Offset to correct servo 0° to true forward (run calibrate_servo_angle.py)
-SERVO_ANGLE_OFFSET = 6.83  # degrees (calibrated via calibrate_servo_angle.py)
+SERVO_ANGLE_OFFSET = -5.5  # degrees (calibrated via calibrate_servo_angle.py)
 TOF_OFFSET_X = 7.0  # cm (forward from wheel axis)
 TOF_OFFSET_Y = 0.0  # cm (lateral center)
 

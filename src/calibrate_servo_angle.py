@@ -14,7 +14,7 @@ import numpy as np
 from sensors.servo import HWServo
 
 
-def calibrate(sweep_range=15, step=0.5, num_sweeps=3):
+def calibrate(sweep_range=20, step=0.5, num_sweeps=3):
     """Sweep servo and find true 0° using parabolic fit."""
     i2c = board.I2C()
     tof = adafruit_vl53l1x.VL53L1X(i2c)
@@ -24,26 +24,28 @@ def calibrate(sweep_range=15, step=0.5, num_sweeps=3):
     angles = np.arange(-sweep_range, sweep_range + step, step)
     all_distances = []
 
-    servo.set_angle(-sweep_range)
-    tof.start_ranging()
-    time.sleep(0.5)
-
     for sweep in range(num_sweeps):
         print(f"Sweep {sweep + 1}/{num_sweeps}")
+
+        servo.set_angle(-sweep_range)
+        tof.stop_ranging()
+        time.sleep(0.5)
+        tof.clear_interrupt()
+
         distances = []
         for angle in angles:
             servo.set_angle(angle)
             time.sleep(0.05)
+
+            tof.start_ranging()
             while not tof.data_ready:
                 time.sleep(0.001)
-            tof.clear_interrupt()
-            while not tof.data_ready:
-                time.sleep(0.001)
+
             distances.append(tof.distance or 0)
             tof.clear_interrupt()
-        all_distances.append(distances)
+            tof.stop_ranging()
 
-    tof.stop_ranging()
+        all_distances.append(distances)
     servo.set_angle(0)
 
     # Average across sweeps

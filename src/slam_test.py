@@ -2,7 +2,7 @@
 """End-to-end SLAM test with predefined movements.
 
 Runs a simple stop-and-scan loop:
-  1. Move (arc motions only — no point turns)
+  1. Turn + drive (no arc motions)
   2. Stop & scan
   3. ICP correction (optional)
   4. Update occupancy grid
@@ -47,21 +47,12 @@ def setup_output_dir():
 
 
 def scan_to_world(scan_sensor, pose):
-    """Transform sensor-frame scan to world frame.
-
-    Args:
-        scan_sensor: (N, 2) points from Scanner (robot frame, no TOF offset).
-        pose: (x, y, heading_deg) robot pose in world frame.
-
-    Returns:
-        (N, 2) points in world frame.
-    """
+    """Transform sensor-frame scan to world frame."""
     x, y, heading_deg = pose
     theta = math.radians(heading_deg)
     c, s = math.cos(theta), math.sin(theta)
     R = np.array([[c, -s], [s, c]])
 
-    # Add TOF offset to get robot-frame points, then rotate+translate to world
     scan_robot = scan_sensor + [TOF_OFFSET_X, TOF_OFFSET_Y]
     return (R @ scan_robot.T).T + np.array([x, y])
 
@@ -121,13 +112,12 @@ def main():
     setup_output_dir()
 
     # ── Predefined movement sequence ──────────────────────────────
-    # ("forward", cm) or ("arc", radius_cm, arc_length_cm)
-    # Positive radius = left turn, negative = right turn
+    # ("forward", cm) or ("turn", degrees) then ("forward", cm)
     movements = [
         ("forward", 30),
-        ("arc", 40, 30),
+        ("turn", 45),
         ("forward", 30),
-        ("arc", -40, 30),
+        ("turn", -90),
         ("forward", 30),
     ]
 
@@ -163,8 +153,8 @@ def main():
             # Execute movement
             if movement[0] == "forward":
                 robot.forward(movement[1])
-            elif movement[0] == "arc":
-                robot.arc(movement[1], movement[2])
+            elif movement[0] == "turn":
+                robot.turn(movement[1])
 
             pose = robot.get_pose()
             print(f"  Odometry: ({pose[0]:.1f}, {pose[1]:.1f}, {pose[2]:.1f}°)")
@@ -187,7 +177,6 @@ def main():
                     angle_corr = math.degrees(math.atan2(R_icp[1, 0], R_icp[0, 0]))
                     corrected_pos = R_icp @ np.array([pose[0], pose[1]]) + t_icp
 
-                    # Update robot's internal pose with correction
                     robot.x = corrected_pos[0]
                     robot.y = corrected_pos[1]
                     robot._heading += angle_corr

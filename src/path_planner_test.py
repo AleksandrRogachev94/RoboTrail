@@ -12,11 +12,9 @@ import numpy as np
 
 from occupancy_grid import OccupancyGrid
 from path_planner import (
-    _interpolate_path,
     a_star,
-    sample_waypoints,
+    plan_path,
     simplify_path,
-    smooth_path,
 )
 
 
@@ -73,8 +71,6 @@ def plot_results(
     goal_xy,
     raw_path=None,
     simplified=None,
-    interpolated=None,
-    smoothed=None,
     waypoints=None,
     save_path="test_path_planner.png",
 ):
@@ -93,14 +89,13 @@ def plot_results(
     except NotImplementedError:
         trav_cropped = None
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle("Path Planning Pipeline", fontsize=14, fontweight="bold")
 
     titles = [
         "1. Traversability + A*",
-        "2. Simplified",
-        "3. Smoothed",
-        "4. Final Waypoints",
+        "2. Simplified (LoS)",
+        "3. Final Waypoints (world coords)",
     ]
 
     blue_cmap = mcolors.ListedColormap(["none", "#3498db40"])
@@ -125,7 +120,7 @@ def plot_results(
 
     if raw_path:
         pts = [grid.grid_to_world(r, c) for r, c in raw_path]
-        axes[0, 0].plot(
+        axes[0].plot(
             [p[0] for p in pts],
             [p[1] for p in pts],
             "b-",
@@ -133,11 +128,11 @@ def plot_results(
             alpha=0.8,
             label=f"A* ({len(raw_path)} pts)",
         )
-        axes[0, 0].legend(fontsize=8)
+        axes[0].legend(fontsize=8)
 
     if simplified:
         pts = [grid.grid_to_world(r, c) for r, c in simplified]
-        axes[0, 1].plot(
+        axes[1].plot(
             [p[0] for p in pts],
             [p[1] for p in pts],
             "m-o",
@@ -145,32 +140,10 @@ def plot_results(
             ms=6,
             label=f"Simplified ({len(simplified)} pts)",
         )
-        if interpolated:
-            ipts = [grid.grid_to_world(r, c) for r, c in interpolated]
-            axes[0, 1].plot(
-                [p[0] for p in ipts],
-                [p[1] for p in ipts],
-                ".",
-                color="orange",
-                ms=3,
-                alpha=0.8,
-                label=f"Interpolated ({len(interpolated)} pts)",
-            )
-        axes[0, 1].legend(fontsize=8)
-
-    if smoothed:
-        pts = [grid.grid_to_world(r, c) for r, c in smoothed]
-        axes[1, 0].plot(
-            [p[0] for p in pts],
-            [p[1] for p in pts],
-            "c-",
-            lw=2,
-            label=f"Smoothed ({len(smoothed)} pts)",
-        )
-        axes[1, 0].legend(fontsize=8)
+        axes[1].legend(fontsize=8)
 
     if waypoints:
-        axes[1, 1].plot(
+        axes[2].plot(
             [p[0] for p in waypoints],
             [p[1] for p in waypoints],
             "r-o",
@@ -178,7 +151,7 @@ def plot_results(
             ms=8,
             label=f"Waypoints ({len(waypoints)} pts)",
         )
-        axes[1, 1].legend(fontsize=8)
+        axes[2].legend(fontsize=8)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -213,56 +186,29 @@ if __name__ == "__main__":
     print("\n── Stage 2: A* Search ──")
     raw_path = None
     if traversable is not None:
-        try:
-            raw_path = a_star(traversable, start_rc, goal_rc)
-            if raw_path:
-                print(f"  ✓ {len(raw_path)} cells")
-            else:
-                print("  ✗ No path found")
-        except NotImplementedError:
-            print("  ⚠ Not implemented")
+        raw_path = a_star(traversable, start_rc, goal_rc)
+        if raw_path:
+            print(f"  ✓ {len(raw_path)} cells")
+        else:
+            print("  ✗ No path found")
 
     # Stage 3: Simplify
-    print("\n── Stage 3: Simplification ──")
+    print("\n── Stage 3: Simplification (Line-of-Sight) ──")
     simplified = None
     if raw_path:
-        try:
-            simplified = simplify_path(raw_path, traversable)
-            print(f"  ✓ {len(raw_path)} → {len(simplified)} waypoints")
-        except NotImplementedError:
-            print("  ⚠ Not implemented")
+        simplified = simplify_path(raw_path, traversable)
+        print(f"  ✓ {len(raw_path)} → {len(simplified)} waypoints")
 
-    # Stage 3b: Interpolate
-    print("\n── Stage 3b: Interpolation ──")
-    interpolated = None
-    if simplified:
-        interpolated = _interpolate_path(simplified)
-        print(f"  ✓ {len(simplified)} → {len(interpolated)} points")
-
-    # Stage 4: Smooth
-    print("\n── Stage 4: Smoothing ──")
-    smoothed = None
-    if interpolated:
-        try:
-            smoothed = smooth_path(interpolated)
-            print(f"  ✓ {len(smoothed)} points")
-        except NotImplementedError:
-            print("  ⚠ Not implemented")
-
-    # Stage 5: Resample
-    print("\n── Stage 5: Waypoints ──")
-    waypoints = None
-    if smoothed:
-        try:
-            waypoints = sample_waypoints(smoothed, grid.grid_to_world)
-            print(f"  ✓ {len(waypoints)} waypoints:")
-            for i, (x, y) in enumerate(waypoints):
-                print(f"    [{i}] ({x:.1f}, {y:.1f})")
-        except NotImplementedError:
-            print("  ⚠ Not implemented")
+    # Stage 4: Full pipeline (plan_path)
+    print("\n── Stage 4: Full Pipeline (plan_path) ──")
+    waypoints = plan_path(grid, start_xy, goal_xy)
+    if waypoints:
+        print(f"  ✓ {len(waypoints)} waypoints:")
+        for i, (x, y) in enumerate(waypoints):
+            print(f"    [{i}] ({x:.1f}, {y:.1f})")
+    else:
+        print("  ✗ No path found")
 
     # Plot
     print()
-    plot_results(
-        grid, start_xy, goal_xy, raw_path, simplified, interpolated, smoothed, waypoints
-    )
+    plot_results(grid, start_xy, goal_xy, raw_path, simplified, waypoints)
