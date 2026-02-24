@@ -300,15 +300,25 @@ class SlamSystem:
                                 f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
                             )
                     else:
-                        should_update_map = force_update  # force keeps map growing
                         match_pct = icp_info.get("match_ratio", 0) * 100
                         mean_err = icp_info.get("mean_error", 0)
+                        # Low match ratio means the robot is facing unexplored space —
+                        # there aren't enough reference points to match against, not
+                        # that the pose is wrong. Trust odometry in this case.
+                        # High match ratio but no convergence = real localization problem.
+                        in_new_territory = match_pct < 30
+                        should_update_map = force_update or in_new_territory
                         self.icp_result = {
                             "status": "failed",
                             "map_pts": len(map_points),
                         }
+                        reason = (
+                            "new territory"
+                            if in_new_territory
+                            else "localization uncertain"
+                        )
                         print(
-                            f"ICP failed (match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
+                            f"ICP failed ({reason} | match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
                         )
                 else:
                     self.icp_result = {"status": "building_map"}
