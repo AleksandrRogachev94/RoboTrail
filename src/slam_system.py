@@ -181,52 +181,23 @@ class SlamSystem:
             try:
                 self.robot.imu.calibrate_gyro(samples=100)
                 self.state = "MOVING"
+                self.message = f"Moving to ({next_x:.0f}, {next_y:.0f})..."
+                self.robot.history = []
+                self.robot.move_to(next_x, next_y)
+                self.pose = self.robot.get_pose()
+                self.path_history.append((self.pose[0], self.pose[1]))
 
-                # ── Turn phase: rotate in ≤45° increments, scanning between each ──
-                TURN_STEP = 45.0
-                TURN_DEADZONE = 5.0  # forward() heading-hold PID handles the last few °
-                MAX_TURN_ITERS = 12
-                for _ in range(MAX_TURN_ITERS):
-                    # Recompute target heading from current position each iteration —
-                    # ICP corrections to x,y change the direction to the waypoint.
-                    dx = next_x - self.robot.x
-                    dy = next_y - self.robot.y
-                    target_hdg = math.degrees(math.atan2(dy, dx))
-                    remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
-                    if abs(remaining) <= TURN_DEADZONE:
-                        break
-                    increment = math.copysign(min(abs(remaining), TURN_STEP), remaining)
-                    self.robot.turn(increment)
-                    self.pose = self.robot.get_pose()
-                    # Recheck; scan only if more turning remains
-                    dx = next_x - self.robot.x
-                    dy = next_y - self.robot.y
-                    target_hdg = math.degrees(math.atan2(dy, dx))
-                    remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
-                    if abs(remaining) > TURN_DEADZONE:
-                        self.message = "Scanning (mid-turn)..."
-                        self._scan_and_update(force_update=True)
-
-                # ── Drive phase: go straight to the waypoint ──
-                dist = math.hypot(next_x - self.robot.x, next_y - self.robot.y)
-                if dist > 1.0:
-                    self.message = f"Driving to ({next_x:.0f}, {next_y:.0f})..."
-                    self.robot.history = []
-                    self.robot.forward(dist)
-                    self.pose = self.robot.get_pose()
-                    self.path_history.append((self.pose[0], self.pose[1]))
-
-                    if self.robot.history:
-                        h = self.robot.history
-                        step = max(1, len(h) // 100)
-                        self.pid_summary = {
-                            "t": [round(s["t"], 3) for s in h[::step]],
-                            "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
-                            "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
-                            "heading_error": [
-                                round(s["heading_error"], 1) for s in h[::step]
-                            ],
-                        }
+                if self.robot.history:
+                    h = self.robot.history
+                    step = max(1, len(h) // 100)
+                    self.pid_summary = {
+                        "t": [round(s["t"], 3) for s in h[::step]],
+                        "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                        "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                        "heading_error": [
+                            round(s["heading_error"], 1) for s in h[::step]
+                        ],
+                    }
 
             except Exception as e:
                 self.state = "ERROR"
