@@ -265,7 +265,7 @@ class SlamSystem:
 
                 if len(map_points) > 10:
                     scan_world, _ = scan_to_world(scan, pose)
-                    R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=8)
+                    R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=6)
 
                     if ok:
                         corr_pos = R @ np.array([pose[0], pose[1]]) + t
@@ -277,7 +277,7 @@ class SlamSystem:
 
                         # Sanity cap: reject implausibly large corrections
                         correction_dist = math.hypot(dx, dy)
-                        if correction_dist > 10.0 or abs(corr_angle) > 10.0:
+                        if correction_dist > 10.0 or abs(corr_angle) > 5.0:
                             should_update_map = force_update  # force keeps map growing
                             self.icp_result = {
                                 "status": "rejected",
@@ -313,18 +313,23 @@ class SlamSystem:
                         # Low match ratio means the robot is facing unexplored space —
                         # there aren't enough reference points to match against, not
                         # that the pose is wrong. Trust odometry in this case.
-                        # High match ratio but no convergence = real localization problem.
+                        # High match ratio = scan is valid even if ICP didn't converge;
+                        # update map with odometry pose to keep frontiers growing.
                         in_new_territory = match_pct < 30
-                        should_update_map = force_update or in_new_territory
+                        high_confidence = match_pct >= 70
+                        should_update_map = (
+                            force_update or in_new_territory or high_confidence
+                        )
                         self.icp_result = {
                             "status": "failed",
                             "map_pts": len(map_points),
                         }
-                        reason = (
-                            "new territory"
-                            if in_new_territory
-                            else "localization uncertain"
-                        )
+                        if in_new_territory:
+                            reason = "new territory"
+                        elif high_confidence:
+                            reason = "no convergence, using odometry"
+                        else:
+                            reason = "localization uncertain"
                         print(
                             f"ICP failed ({reason} | match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
                         )
