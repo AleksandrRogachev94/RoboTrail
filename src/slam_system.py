@@ -183,25 +183,27 @@ class SlamSystem:
                 self.state = "MOVING"
 
                 # ── Turn phase: rotate in ≤45° increments, scanning between each ──
-                dx = next_x - self.robot.x
-                dy = next_y - self.robot.y
-                target_hdg = math.degrees(math.atan2(dy, dx))
-
                 TURN_STEP = 45.0
-                MAX_TURN_ITERS = 12  # safety: max 12×45° = 540° before giving up
+                TURN_DEADZONE = 5.0  # forward() heading-hold PID handles the last few °
+                MAX_TURN_ITERS = 12
                 for _ in range(MAX_TURN_ITERS):
-                    # Recompute from actual heading each time — ICP corrections
-                    # can shift heading during mid-turn scans, so tracking a
-                    # decrement counter leads to infinite loops.
+                    # Recompute target heading from current position each iteration —
+                    # ICP corrections to x,y change the direction to the waypoint.
+                    dx = next_x - self.robot.x
+                    dy = next_y - self.robot.y
+                    target_hdg = math.degrees(math.atan2(dy, dx))
                     remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
-                    if abs(remaining) <= 2.0:
+                    if abs(remaining) <= TURN_DEADZONE:
                         break
                     increment = math.copysign(min(abs(remaining), TURN_STEP), remaining)
                     self.robot.turn(increment)
                     self.pose = self.robot.get_pose()
-                    # Recheck after turn; scan only if more turning left
+                    # Recheck; scan only if more turning remains
+                    dx = next_x - self.robot.x
+                    dy = next_y - self.robot.y
+                    target_hdg = math.degrees(math.atan2(dy, dx))
                     remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
-                    if abs(remaining) > 2.0:
+                    if abs(remaining) > TURN_DEADZONE:
                         self.message = "Scanning (mid-turn)..."
                         self._scan_and_update(force_update=True)
 
