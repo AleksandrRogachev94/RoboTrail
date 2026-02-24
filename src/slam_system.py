@@ -241,7 +241,7 @@ class SlamSystem:
         self.message = "Scanning..."
 
         try:
-            scan = self.scanner.scan()
+            scan, free_rays = self.scanner.scan()
             pose = self.robot.get_pose()
             should_update_map = True  # Default: update map
 
@@ -325,7 +325,7 @@ class SlamSystem:
 
             # Only update grid when localization is confident
             if should_update_map:
-                self.grid.update(scan, pose)
+                self.grid.update(scan, pose, free_rays=free_rays)
                 self.pose = pose
                 self.map_version += 1
             else:

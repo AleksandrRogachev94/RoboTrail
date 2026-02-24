@@ -136,7 +136,7 @@ def main():
         # ── Initial scan ──────────────────────────────────────────
         input("\nPress Enter to take initial scan (step 0)...")
         pose = robot.get_pose()
-        scan = scanner.scan()
+        scan, _ = scanner.scan()
 
         grid.update(scan, pose)
         grid.plot(robot_pose=pose, save_path=os.path.join(OUTPUT_DIR, "step00_map.png"))
@@ -161,7 +161,7 @@ def main():
 
             # Scan
             print("  Scanning...")
-            scan = scanner.scan()
+            scan, _ = scanner.scan()
 
             # ICP correction
             if USE_ICP and prev_scan_world is not None and len(scan) > 5:

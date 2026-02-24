@@ -77,26 +77,30 @@ class Scanner:
             self.vl53.clear_interrupt()
             self.vl53.stop_ranging()
 
-        cartesian = []
+        hits = []
+        free_rays = []
+        MAX_RANGE = 120  # VL53L1X accuracy degrades beyond this
         for i, angle in enumerate(angles):
             angle_rad = math.radians(angle)
             distance = distances[i]
-            if distance is None:
-                continue
-            if distance > 120:  # VL53L1X accuracy degrades beyond ~120cm
-                continue
-            # Convert to Cartesian (Robot Frame: X=Forward, Y=Left)
-            # Angle 0 is Forward (+X)
-            # Note: Y is inverted because physical servo moves Right for +Angle commands
-            x = distance * math.cos(angle_rad)
-            y = -distance * math.sin(angle_rad)
-            cartesian.append([x, y])
+            if distance is None or distance > MAX_RANGE:
+                # No obstacle detected — mark the full ray as free up to MAX_RANGE
+                x = MAX_RANGE * math.cos(angle_rad)
+                y = -MAX_RANGE * math.sin(angle_rad)
+                free_rays.append([x, y])
+            else:
+                # Obstacle detected within range
+                x = distance * math.cos(angle_rad)
+                y = -distance * math.sin(angle_rad)
+                hits.append([x, y])
 
-        return np.array(cartesian)
+        hits_arr = np.array(hits) if hits else np.zeros((0, 2))
+        free_arr = np.array(free_rays) if free_rays else np.zeros((0, 2))
+        return hits_arr, free_arr
 
 
 if __name__ == "__main__":
-    scan = Scanner().scan()
+    scan, _ = Scanner().scan()
 
     # Create the scatter plot
     plt.scatter(scan[:, 0], scan[:, 1])

@@ -51,7 +51,7 @@ def test_timing_budget():
         print(f"Scanning: {cfg['label']}")
         scanner = Scanner(timing_budget=cfg["timing_budget"])
         start = time.time()
-        scan_points = scanner.scan()
+        scan_points, _ = scanner.scan()
         elapsed = time.time() - start
         results.append((scan_points, f"{cfg['label']} ({elapsed:.1f}s)"))
 
@@ -75,7 +75,7 @@ def test_num_points():
         print(f"Scanning: {cfg['label']}")
         scanner = Scanner(num_points=cfg["num_points"])
         start = time.time()
-        scan_points = scanner.scan()
+        scan_points, _ = scanner.scan()
         elapsed = time.time() - start
         results.append((scan_points, f"{cfg['label']} ({elapsed:.1f}s)"))
 
@@ -100,7 +100,7 @@ def test_settle_delay():
         print(f"Scanning: {cfg['label']}")
         scanner = Scanner(settle_delay=cfg["settle_delay"])
         start = time.time()
-        scan_points = scanner.scan()
+        scan_points, _ = scanner.scan()
         elapsed = time.time() - start
         results.append((scan_points, f"{cfg['label']} ({elapsed:.1f}s)"))
 
@@ -127,13 +127,13 @@ def test_direction(settle_delay=None):
     # Forward scan (-60 to +60)
     print("Forward scan...")
     start = time.time()
-    forward = scanner.scan(from_angle=-60, to_angle=60)
+    forward, _ = scanner.scan(from_angle=-60, to_angle=60)
     forward_time = time.time() - start
 
     # Backward scan (+60 to -60)
     print("Backward scan...")
     start = time.time()
-    backward = scanner.scan(from_angle=60, to_angle=-60)
+    backward, _ = scanner.scan(from_angle=60, to_angle=-60)
     backward_time = time.time() - start
 
     results = [

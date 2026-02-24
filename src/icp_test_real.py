@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     # Step 1: Reference scan
     print("Taking reference scan (Scan A)...")
-    scan_a_sensor = scanner.scan()
+    scan_a_sensor, _ = scanner.scan()
     # Convert to Robot Frame
     scan_a = scan_a_sensor + [TOF_OFFSET_X, TOF_OFFSET_Y]
     print(f"  Scan A: {len(scan_a)} points")
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     # Step 3: Second scan
     print("Taking second scan (Scan B)...")
-    scan_b_sensor = scanner.scan()
+    scan_b_sensor, _ = scanner.scan()
     # Convert to Robot Frame
     scan_b = scan_b_sensor + [TOF_OFFSET_X, TOF_OFFSET_Y]
     print(f"  Scan B: {len(scan_b)} points")

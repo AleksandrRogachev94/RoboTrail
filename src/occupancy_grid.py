@@ -149,48 +149,56 @@ class OccupancyGrid:
 
     # ── Map Update ─────────────────────────────────────────────────────
 
-    def update(self, scan_points: np.ndarray, robot_pose: tuple) -> None:
+    def update(
+        self,
+        scan_points: np.ndarray,
+        robot_pose: tuple,
+        free_rays: np.ndarray | None = None,
+    ) -> None:
         """Update the grid with one scan from a known robot pose.
 
-        For each scan point:
-        1. Compute hit position in world frame (via scan_to_world)
-        2. Bresenham ray trace from sensor to hit point
-        3. Mark free cells (all cells along ray EXCEPT last) → subtract L_FREE
-        4. Mark occupied cell (last cell in ray) → add L_OCC
-        5. Clamp all updated cells to [L_MIN, L_MAX]
+        For each scan point (hit):
+        1. Bresenham ray trace from sensor to hit point
+        2. Mark free cells (all cells along ray EXCEPT last) → subtract L_FREE
+        3. Mark occupied cell (last cell in ray) → add L_OCC
+
+        For each free_ray (no obstacle detected, just open space):
+        1. Bresenham ray trace from sensor to endpoint
+        2. Mark ALL cells along ray as free (including endpoint) → subtract L_FREE
 
         Args:
-            scan_points: (N, 2) array in sensor frame (from Scanner).
+            scan_points: (N, 2) array of obstacle hit points in sensor frame.
             robot_pose:  (x, y, heading_deg) — robot position in world frame.
+            free_rays:   (M, 2) array of beyond-range ray endpoints in sensor frame.
         """
         world_points, sensor_origin = scan_to_world(scan_points, robot_pose)
-
         sensor_row, sensor_col = self.world_to_grid(sensor_origin[0], sensor_origin[1])
 
+        # ── Obstacle hits: mark ray as free, endpoint as occupied ──
         for i in range(len(world_points)):
             world_x, world_y = world_points[i]
-
-            # Convert hit point to grid coordinates
             hit_row, hit_col = self.world_to_grid(world_x, world_y)
-
-            # Bounds check
             if not (0 <= hit_row < GRID_SIZE and 0 <= hit_col < GRID_SIZE):
                 continue
-
-            # Bresenham ray from sensor to hit point
             ray = self.bresenham(sensor_row, sensor_col, hit_row, hit_col)
-
-            # Mark free cells (all except last)
             for r, c in ray[:-1]:
                 if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
                     self.grid[r, c] -= L_FREE
-
-            # Mark occupied cell (last cell)
             r, c = ray[-1]
             if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
                 self.grid[r, c] += L_OCC
 
-        # Clamp entire grid
+        # ── Free rays: mark entire ray as free, no obstacle at end ──
+        if free_rays is not None and len(free_rays) > 0:
+            free_world, _ = scan_to_world(free_rays, robot_pose)
+            for i in range(len(free_world)):
+                world_x, world_y = free_world[i]
+                end_row, end_col = self.world_to_grid(world_x, world_y)
+                ray = self.bresenham(sensor_row, sensor_col, end_row, end_col)
+                for r, c in ray:
+                    if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+                        self.grid[r, c] -= L_FREE
+
         np.clip(self.grid, L_MIN, L_MAX, out=self.grid)
 
     # ── Queries ─────────────────────────────────────────────────────────
