@@ -168,7 +168,7 @@ def main():
                 scan_world_odom = scan_to_world(scan, pose)
 
                 print("  Running ICP...")
-                R_icp, t_icp, aligned, converged = icp(
+                R_icp, t_icp, aligned, converged, _ = icp(
                     scan_world_odom, prev_scan_world, max_distance=20
                 )
 

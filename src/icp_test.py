@@ -142,7 +142,7 @@ if __name__ == "__main__":
     map_points = generate_rectangle_map(room_width, room_height, point_spacing)
     scan, true_R, true_t = sample_scan_from_map(map_points)
 
-    estimated_R, estimated_t, aligned_scan, converged = icp(scan, map_points)
+    estimated_R, estimated_t, aligned_scan, converged, _ = icp(scan, map_points)
     print(f"Converged: {converged}")
 
     visualize_iteration(map_points, scan, aligned_scan, "Final")

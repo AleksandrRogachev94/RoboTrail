@@ -232,13 +232,13 @@ def icp(
         )
 
         if len(matched_source) < 3:
-            break
+            return total_R, total_t, source_current, False, {}
 
         # Require at least 40% of source points to have matches
         # Otherwise ICP is fitting to too few points and is unreliable
         match_ratio = len(matched_source) / len(source)
         if match_ratio < 0.4:
-            break
+            return total_R, total_t, source_current, False, {}
 
         # Step 2: Decide which correspondences have reliable normals
         if map_normals is not None and len(tgt_indices) > 0:
@@ -280,9 +280,21 @@ def icp(
         translation_change = np.linalg.norm(t)
 
         if angle_change < tolerance and translation_change < tolerance:
-            return total_R, total_t, source_current, True
+            info = {
+                "match_ratio": len(matched_source) / len(source),
+                "mean_error": float(dists.mean()),
+                "matches": len(matched_source),
+            }
+            return total_R, total_t, source_current, True, info
 
-    return total_R, total_t, source_current, False
+    info = {}
+    if len(matched_source) > 0:
+        info = {
+            "match_ratio": len(matched_source) / len(source),
+            "mean_error": float(dists.mean()),
+            "matches": len(matched_source),
+        }
+    return total_R, total_t, source_current, False, info
 
 
 def _point_to_point_step(matched_source, matched_target):

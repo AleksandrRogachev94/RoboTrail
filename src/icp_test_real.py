@@ -54,7 +54,7 @@ if __name__ == "__main__":
     scan_b_transformed = (R_odom @ scan_b.T).T + [odom_x, odom_y]
     # Step 5: Run ICP
     print("Running ICP...")
-    R, t, aligned, converged = icp(scan_b_transformed, scan_a, max_distance=20)
+    R, t, aligned, converged, _ = icp(scan_b_transformed, scan_a, max_distance=20)
 
     # Extract rotation angle
     angle_rad = np.arctan2(R[1, 0], R[0, 0])

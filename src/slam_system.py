@@ -278,13 +278,15 @@ class SlamSystem:
 
                 if len(map_points) > 10:
                     scan_world, _ = scan_to_world(scan, pose)
-                    R, t, _, ok = icp(scan_world, map_points, max_distance=8)
+                    R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=5)
 
                     if ok:
                         corr_pos = R @ np.array([pose[0], pose[1]]) + t
                         corr_angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
                         dx = corr_pos[0] - pose[0]
                         dy = corr_pos[1] - pose[1]
+                        match_pct = icp_info.get("match_ratio", 0) * 100
+                        mean_err = icp_info.get("mean_error", 0)
 
                         # Sanity cap: reject implausibly large corrections
                         correction_dist = math.hypot(dx, dy)
@@ -299,7 +301,7 @@ class SlamSystem:
                             }
                             print(
                                 f"ICP rejected: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
-                                f"(too large, map: {len(map_points)} pts)"
+                                f"(too large | match={match_pct:.0f}% err={mean_err:.1f}cm)"
                             )
                         else:
                             self.robot.set_pose(
@@ -314,15 +316,20 @@ class SlamSystem:
                                 "map_pts": len(map_points),
                             }
                             print(
-                                f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° (map: {len(map_points)} pts)"
+                                f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
+                                f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
                             )
                     else:
                         should_update_map = False
+                        match_pct = icp_info.get("match_ratio", 0) * 100
+                        mean_err = icp_info.get("mean_error", 0)
                         self.icp_result = {
                             "status": "failed",
                             "map_pts": len(map_points),
                         }
-                        print(f"ICP failed to converge (map: {len(map_points)} pts)")
+                        print(
+                            f"ICP failed (match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
+                        )
                 else:
                     self.icp_result = {"status": "building_map"}
 
