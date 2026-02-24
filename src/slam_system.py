@@ -186,16 +186,22 @@ class SlamSystem:
                 dx = next_x - self.robot.x
                 dy = next_y - self.robot.y
                 target_hdg = math.degrees(math.atan2(dy, dx))
-                remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
 
                 TURN_STEP = 45.0
-                while abs(remaining) > 2.0:
+                MAX_TURN_ITERS = 12  # safety: max 12×45° = 540° before giving up
+                for _ in range(MAX_TURN_ITERS):
+                    # Recompute from actual heading each time — ICP corrections
+                    # can shift heading during mid-turn scans, so tracking a
+                    # decrement counter leads to infinite loops.
+                    remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
+                    if abs(remaining) <= 2.0:
+                        break
                     increment = math.copysign(min(abs(remaining), TURN_STEP), remaining)
                     self.robot.turn(increment)
                     self.pose = self.robot.get_pose()
-                    remaining -= increment
+                    # Recheck after turn; scan only if more turning left
+                    remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
                     if abs(remaining) > 2.0:
-                        # Scan mid-rotation so ICP builds coverage incrementally
                         self.message = "Scanning (mid-turn)..."
                         self._scan_and_update(force_update=True)
 
