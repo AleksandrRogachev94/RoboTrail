@@ -185,6 +185,13 @@ class SlamSystem:
                 self.robot.history = []
                 self.robot.move_to(next_x, next_y)
                 self.pose = self.robot.get_pose()
+                # Normalize heading to [-180, 180] to prevent accumulation
+                self.robot.set_pose(
+                    self.pose[0],
+                    self.pose[1],
+                    (self.pose[2] + 180) % 360 - 180,
+                )
+                self.pose = self.robot.get_pose()
                 self.path_history.append((self.pose[0], self.pose[1]))
 
                 if self.robot.history:
@@ -258,7 +265,7 @@ class SlamSystem:
 
                 if len(map_points) > 10:
                     scan_world, _ = scan_to_world(scan, pose)
-                    R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=5)
+                    R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=8)
 
                     if ok:
                         corr_pos = R @ np.array([pose[0], pose[1]]) + t
@@ -284,8 +291,9 @@ class SlamSystem:
                                 f"(too large | match={match_pct:.0f}% err={mean_err:.1f}cm)"
                             )
                         else:
+                            corrected_heading = (pose[2] + corr_angle + 180) % 360 - 180
                             self.robot.set_pose(
-                                corr_pos[0], corr_pos[1], pose[2] + corr_angle
+                                corr_pos[0], corr_pos[1], corrected_heading
                             )
                             pose = self.robot.get_pose()
                             self.icp_result = {

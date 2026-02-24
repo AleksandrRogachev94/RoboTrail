@@ -237,7 +237,7 @@ def icp(
         # Require at least 40% of source points to have matches
         # Otherwise ICP is fitting to too few points and is unreliable
         match_ratio = len(matched_source) / len(source)
-        if match_ratio < 0.4:
+        if match_ratio < 0.25:
             return total_R, total_t, source_current, False, {}
 
         # Step 2: Decide which correspondences have reliable normals

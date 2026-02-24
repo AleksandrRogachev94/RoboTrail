@@ -91,7 +91,9 @@ def select_goal(
 ) -> tuple[float, float] | None:
     """Pick the best frontier goal from detected clusters.
 
-    Scores each cluster by path distance only (turning is cheap).
+    Scores each cluster by path distance + heading penalty (0.5cm per
+    degree of turn required). Prefers goals roughly ahead of the robot
+    to minimize large rotations that break ICP overlap.
     The goal is the closest point in the cluster to the robot.
 
     Args:
@@ -139,12 +141,17 @@ def select_goal(
         if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
             continue
 
-        # Score = path distance only (turning in place is cheap)
+        # Score = path distance + heading penalty
         path = a_star(traversable, start_rc, goal_rc)
         if path is None:
             continue
 
-        score = len(path) * GRID_RESOLUTION
+        # Penalize goals that require large heading changes —
+        # reduces unnecessary rotations that break ICP overlap
+        goal_heading = math.degrees(math.atan2(gy - ry, gx - rx))
+        heading_diff = abs((goal_heading - heading_deg + 180) % 360 - 180)
+        heading_penalty = heading_diff * 0.5  # 0.5cm-equivalent per degree
+        score = len(path) * GRID_RESOLUTION + heading_penalty
 
         if score < best_score:
             best_score = score
