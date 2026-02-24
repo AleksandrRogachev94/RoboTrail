@@ -17,7 +17,7 @@ class Scanner:
         num_points=80,
         timing_budget=50,
         settle_delay=0.03,
-        distance_mode=2,
+        distance_mode=1,  # 1=short (~130cm, accurate), 2=long (~400cm, noisy)
         servo_reversed=True,
     ):
         print("initializing scanner")
@@ -82,6 +82,8 @@ class Scanner:
             angle_rad = math.radians(angle)
             distance = distances[i]
             if distance is None:
+                continue
+            if distance > 120:  # VL53L1X accuracy degrades beyond ~120cm
                 continue
             # Convert to Cartesian (Robot Frame: X=Forward, Y=Left)
             # Angle 0 is Forward (+X)
