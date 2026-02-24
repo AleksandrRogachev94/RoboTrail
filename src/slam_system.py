@@ -130,7 +130,7 @@ class SlamSystem:
             self.scanner = Scanner()
 
             # Initial scan at origin
-            self._scan_and_update()
+            self._scan_and_update(force_update=True)
             self.state = "IDLE"
             self.message = "Ready"
             print("Hardware ready.")
@@ -197,7 +197,7 @@ class SlamSystem:
                     if abs(remaining) > 2.0:
                         # Scan mid-rotation so ICP builds coverage incrementally
                         self.message = "Scanning (mid-turn)..."
-                        self._scan_and_update()
+                        self._scan_and_update(force_update=True)
 
                 # ── Drive phase: go straight to the waypoint ──
                 dist = math.hypot(next_x - self.robot.x, next_y - self.robot.y)
@@ -250,12 +250,13 @@ class SlamSystem:
             self.state = "IDLE"
             self.message = "Ready"
 
-    def _scan_and_update(self):
+    def _scan_and_update(self, force_update=False):
         """Scan, optionally ICP correct, update grid.
 
-        Grid is only updated when ICP succeeds (or during initial map building).
-        If ICP fails or rejects, the scan is discarded to prevent corrupting
-        the map with poorly-localized data.
+        Args:
+            force_update: If True, always update the map even if ICP fails.
+                          Used for mid-turn scans (robot only rotated, odometry
+                          is IMU-accurate) and bootstrap scans.
         """
         self.state = "SCANNING"
         self.message = "Scanning..."
@@ -291,7 +292,7 @@ class SlamSystem:
                         # Sanity cap: reject implausibly large corrections
                         correction_dist = math.hypot(dx, dy)
                         if correction_dist > 10.0 or abs(corr_angle) > 10.0:
-                            should_update_map = False
+                            should_update_map = force_update  # force keeps map growing
                             self.icp_result = {
                                 "status": "rejected",
                                 "dx": round(dx, 1),
@@ -320,7 +321,7 @@ class SlamSystem:
                                 f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
                             )
                     else:
-                        should_update_map = False
+                        should_update_map = force_update  # force keeps map growing
                         match_pct = icp_info.get("match_ratio", 0) * 100
                         mean_err = icp_info.get("mean_error", 0)
                         self.icp_result = {
@@ -436,7 +437,7 @@ class SlamSystem:
             and not traversable[cr, cc]
         ):
             print("Wall ahead — scanning instead")
-            self._scan_and_update()
+            self._scan_and_update(force_update=True)
             return
 
         try:
@@ -452,4 +453,4 @@ class SlamSystem:
             traceback.print_exc()
             self._exploring = False
             return
-        self._scan_and_update()
+        self._scan_and_update(force_update=True)
