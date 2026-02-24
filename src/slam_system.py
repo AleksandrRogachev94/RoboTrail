@@ -56,7 +56,6 @@ class SlamSystem:
     # ── Exploration constants ──────────────────────────────────────────
     BOOTSTRAP_DRIVE_CM = 15.0  # Forward drive when map is too young for frontiers
     ARRIVAL_THRESHOLD = 10.0  # cm — close enough to target
-    SCAN_INTERVAL_CM = 40.0  # Drive at most this far before scanning
 
     def start(self):
         """Start background control loop."""
@@ -144,9 +143,9 @@ class SlamSystem:
     def _move_scan_update(self, target):
         """Navigate to target using receding horizon path planning.
 
-        At each step: plan path → drive up to SCAN_INTERVAL_CM → scan →
-        repeat. Re-plans from current position every iteration to handle
-        new obstacles discovered by scanning.
+        At each step: plan path → for each waypoint: turn incrementally
+        (≤45° at a time, scanning after each increment) → drive → scan.
+        Re-plans after each waypoint to handle newly discovered obstacles.
         """
         tx, ty = target
         MAX_STEPS = 50  # safety limit
@@ -175,48 +174,67 @@ class SlamSystem:
 
             # Store full planned path for UI display
             self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
+            next_x, next_y = waypoints[1]
 
-            print(
-                f"Step {step_i + 1}: {len(waypoints) - 1} waypoints, "
-                f"driving <={self.SCAN_INTERVAL_CM}cm before scan"
-            )
+            print(f"Step {step_i + 1}: heading to ({next_x:.0f}, {next_y:.0f})")
 
-            # Drive up to SCAN_INTERVAL_CM then stop for scan
-            self.state = "MOVING"
-            self.message = "Calibrating gyro..."
             try:
                 self.robot.imu.calibrate_gyro(samples=100)
-                self.message = f"Driving (<={self.SCAN_INTERVAL_CM:.0f}cm segment)..."
-                self.robot.history = []
-                self.robot.follow_path(waypoints, max_distance_cm=self.SCAN_INTERVAL_CM)
-                self.pose = self.robot.get_pose()
-                self.path_history.append((self.pose[0], self.pose[1]))
+                self.state = "MOVING"
 
-                if self.robot.history:
-                    h = self.robot.history
-                    step = max(1, len(h) // 100)
-                    self.pid_summary = {
-                        "t": [round(s["t"], 3) for s in h[::step]],
-                        "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
-                        "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
-                        "heading_error": [
-                            round(s["heading_error"], 1) for s in h[::step]
-                        ],
-                    }
+                # ── Turn phase: rotate in ≤45° increments, scanning between each ──
+                dx = next_x - self.robot.x
+                dy = next_y - self.robot.y
+                target_hdg = math.degrees(math.atan2(dy, dx))
+                remaining = (target_hdg - self.robot._heading + 180) % 360 - 180
+
+                TURN_STEP = 45.0
+                while abs(remaining) > 2.0:
+                    increment = math.copysign(min(abs(remaining), TURN_STEP), remaining)
+                    self.robot.turn(increment)
+                    self.pose = self.robot.get_pose()
+                    remaining -= increment
+                    if abs(remaining) > 2.0:
+                        # Scan mid-rotation so ICP builds coverage incrementally
+                        self.message = "Scanning (mid-turn)..."
+                        self._scan_and_update()
+
+                # ── Drive phase: go straight to the waypoint ──
+                dist = math.hypot(next_x - self.robot.x, next_y - self.robot.y)
+                if dist > 1.0:
+                    self.message = f"Driving to ({next_x:.0f}, {next_y:.0f})..."
+                    self.robot.history = []
+                    self.robot.forward(dist)
+                    self.pose = self.robot.get_pose()
+                    self.path_history.append((self.pose[0], self.pose[1]))
+
+                    if self.robot.history:
+                        h = self.robot.history
+                        step = max(1, len(h) // 100)
+                        self.pid_summary = {
+                            "t": [round(s["t"], 3) for s in h[::step]],
+                            "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                            "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                            "heading_error": [
+                                round(s["heading_error"], 1) for s in h[::step]
+                            ],
+                        }
+
             except Exception as e:
                 self.state = "ERROR"
                 self.message = f"Move failed: {e}"
                 traceback.print_exc()
                 break
 
-            # Scan and update map
+            # ── Scan phase: always scan after arriving at each waypoint ──
             odom_pos = (self.pose[0], self.pose[1])
             self._scan_and_update()
 
             # Record ICP correction if it happened
             corrected_pos = (self.pose[0], self.pose[1])
             if self.icp_result and self.icp_result.get("status") == "converged":
-                self.path_history[-1] = corrected_pos
+                if self.path_history:
+                    self.path_history[-1] = corrected_pos
                 self.icp_corrections.append(
                     {
                         "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
@@ -233,13 +251,19 @@ class SlamSystem:
             self.message = "Ready"
 
     def _scan_and_update(self):
-        """Scan, optionally ICP correct, update grid."""
+        """Scan, optionally ICP correct, update grid.
+
+        Grid is only updated when ICP succeeds (or during initial map building).
+        If ICP fails or rejects, the scan is discarded to prevent corrupting
+        the map with poorly-localized data.
+        """
         self.state = "SCANNING"
         self.message = "Scanning..."
 
         try:
             scan = self.scanner.scan()
             pose = self.robot.get_pose()
+            should_update_map = True  # Default: update map
 
             # ICP correction: scan-to-map matching
             if self.use_icp and len(scan) > 5:
@@ -265,6 +289,7 @@ class SlamSystem:
                         # Sanity cap: reject implausibly large corrections
                         correction_dist = math.hypot(dx, dy)
                         if correction_dist > 10.0 or abs(corr_angle) > 10.0:
+                            should_update_map = False
                             self.icp_result = {
                                 "status": "rejected",
                                 "dx": round(dx, 1),
@@ -292,6 +317,7 @@ class SlamSystem:
                                 f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° (map: {len(map_points)} pts)"
                             )
                     else:
+                        should_update_map = False
                         self.icp_result = {
                             "status": "failed",
                             "map_pts": len(map_points),
@@ -300,10 +326,13 @@ class SlamSystem:
                 else:
                     self.icp_result = {"status": "building_map"}
 
-            # Update grid
-            self.grid.update(scan, pose)
-            self.pose = pose
-            self.map_version += 1
+            # Only update grid when localization is confident
+            if should_update_map:
+                self.grid.update(scan, pose)
+                self.pose = pose
+                self.map_version += 1
+            else:
+                print("Scan discarded (ICP unsuccessful)")
 
         except Exception as e:
             self.state = "ERROR"

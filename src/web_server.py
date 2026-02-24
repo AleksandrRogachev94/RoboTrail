@@ -4,6 +4,7 @@ Run on Pi: sudo python3 web_server.py
 Then open http://<pi-ip> in browser.
 """
 
+import logging
 import signal
 import sys
 
@@ -80,5 +81,7 @@ def shutdown(sig, frame):
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown)
     slam.start()
+    # Suppress per-request access logs from werkzeug
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     print("Server starting on http://0.0.0.0:80")
     app.run(host="0.0.0.0", port=80, debug=False, use_reloader=False)

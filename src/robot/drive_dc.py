@@ -182,6 +182,7 @@ class RobotDC:
         target_ticks = abs(cm) * TICKS_PER_CM
         total_cm = abs(cm)
         direction = 1.0 if cm >= 0 else -1.0
+        print(f"Forward {cm:+.1f}cm (heading={self._heading:.1f}°)")
 
         self.left.reset()
         self.right.reset()
@@ -238,6 +239,9 @@ class RobotDC:
         """
         if abs(degrees) < 1.0:
             return  # Too small to bother
+        print(
+            f"Turn {degrees:+.1f}° (heading={self._heading:.1f}° → {self._heading + degrees:.1f}°)"
+        )
 
         self.left.reset()
         self.right.reset()

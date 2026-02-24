@@ -53,12 +53,15 @@ def calibrate(sweep_range=20, step=0.5, num_sweeps=3):
 
     # Parabolic fit: d = a*θ² + b*θ + c, peak at θ = -b/(2a)
     coeffs = np.polyfit(angles, avg_distances, deg=2)
-    offset = -coeffs[1] / (2 * coeffs[0])
+    peak_angle = -coeffs[1] / (2 * coeffs[0])
+    # The offset is negated: if forward is at sweep angle -5°, we need
+    # offset=+5 so set_angle(0) physically points to that angle.
+    offset = -peak_angle
     fit_curve = np.polyval(coeffs, angles)
 
     print("\n=== RESULT ===")
-    print(f"Servo offset: {offset:.2f}°")
-    print(f"Add to config.py: SERVO_ANGLE_OFFSET = {offset:.2f}")
+    print(f"Peak (true forward) at sweep angle: {peak_angle:.2f}°")
+    print(f"Add to config.py: SERVO_ANGLE_OFFSET = {offset:.1f}")
 
     # Plot
     plt.figure(figsize=(8, 5))
