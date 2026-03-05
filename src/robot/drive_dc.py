@@ -252,8 +252,18 @@ class RobotDC:
         direction = 1.0 if degrees > 0 else -1.0
 
         t = 0.0
+        # Timeout: generous limit to prevent infinite rotation
+        # Estimate time from angle / (avg_velocity / ticks_per_cm / wheel_spacing)
+        max_turn_time = max(3.0, total_angle / 20.0)  # at least 3s, ~20°/sec typical
         last_time = monotonic()
+        start_time = last_time
         while abs(target_heading - self._heading) > 1.0:
+            if monotonic() - start_time > max_turn_time:
+                print(
+                    f"Turn timeout after {max_turn_time:.1f}s "
+                    f"(remaining={abs(target_heading - self._heading):.1f}°)"
+                )
+                break
             now = monotonic()
             dt_actual = now - last_time
             last_time = now
