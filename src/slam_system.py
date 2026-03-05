@@ -248,9 +248,13 @@ class SlamSystem:
         self.message = "Scanning..."
 
         try:
+            t0 = time.monotonic()
             scan, free_rays = self.scanner.scan()
+            t_scan = time.monotonic() - t0
+
             pose = self.robot.get_pose()
             should_update_map = True  # Default: update map
+            t_icp = 0.0
 
             # ICP correction: scan-to-map matching
             if self.use_icp and len(scan) > 5:
@@ -265,7 +269,9 @@ class SlamSystem:
 
                 if len(map_points) > 10:
                     scan_world, _ = scan_to_world(scan, pose)
+                    t1 = time.monotonic()
                     R, t, _, ok, icp_info = icp(scan_world, map_points, max_distance=6)
+                    t_icp = time.monotonic() - t1
 
                     if ok:
                         corr_pos = R @ np.array([pose[0], pose[1]]) + t
@@ -338,11 +344,20 @@ class SlamSystem:
 
             # Only update grid when localization is confident
             if should_update_map:
+                t2 = time.monotonic()
                 self.grid.update(scan, pose, free_rays=free_rays)
+                t_grid = time.monotonic() - t2
                 self.pose = pose
                 self.map_version += 1
             else:
+                t_grid = 0.0
                 print("Scan discarded (ICP unsuccessful)")
+
+            t_total = time.monotonic() - t0
+            print(
+                f"⏱ scan={t_scan:.2f}s icp={t_icp:.2f}s "
+                f"grid={t_grid:.2f}s total={t_total:.2f}s"
+            )
 
         except Exception as e:
             self.state = "ERROR"
@@ -372,7 +387,9 @@ class SlamSystem:
         """One iteration: detect frontiers → select goal → navigate → scan."""
         self.state = "EXPLORING"
         self.message = "Detecting frontiers..."
+        t0 = time.monotonic()
         clusters = find_frontiers(self.grid)
+        t_frontier = time.monotonic() - t0
         self.frontier_data = get_frontier_viz_data(self.grid, clusters, self.pose)
 
         # No frontiers found
@@ -395,12 +412,15 @@ class SlamSystem:
         )
 
         # Select best reachable goal (skip goals within ARRIVAL_THRESHOLD)
+        t1 = time.monotonic()
         goal = select_goal(
             self.grid,
             clusters,
             self.pose,
             min_distance_cm=self.ARRIVAL_THRESHOLD,
         )
+        t_goal = time.monotonic() - t1
+        print(f"⏱ frontiers={t_frontier:.2f}s goal_select={t_goal:.2f}s")
         if goal is None:
             if self.map_version <= 2:
                 print(
