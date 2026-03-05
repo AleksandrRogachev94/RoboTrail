@@ -37,9 +37,15 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     log_odds = grid.grid
     rows, cols = log_odds.shape
 
-    # Traversability grid bridges gaps between scan rays (free inflation)
-    # and stays away from walls (obstacle inflation).
-    traversable = grid.get_traversability_grid()
+    # Use REDUCED obstacle inflation for frontier detection.
+    # Full inflation (robot radius + padding) is too aggressive — it masks out
+    # valid frontiers near wall fragments. For detection we only need to avoid
+    # marking cells literally inside walls, not maintain full robot clearance.
+    # The path planner still uses full inflation for safe navigation.
+    detection_obstacle_inflation = 2  # ~4cm at 2cm resolution — just avoid walls
+    traversable = grid.get_traversability_grid(
+        obstacle_inflation=detection_obstacle_inflation
+    )
     unknown_mask = np.abs(log_odds) < 0.1
 
     # Frontier = traversable cell with at least one unknown neighbor
