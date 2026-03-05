@@ -36,7 +36,7 @@ MIN_SPEED_FACTOR = 0.3  # Minimum speed during ramp (30% of target)
 # Turn profile
 RAMP_ANGLE_DEG = 20.0  # Ramp up/down over this angle
 MAX_TURN_VELOCITY = 500  # ticks/sec max wheel speed during turns
-MIN_TURN_FACTOR = 0.2  # Minimum speed during turn ramp (20%)
+MIN_TURN_FACTOR = 0.35  # Minimum speed during turn ramp (35%)
 TURN_PID_FINE_GAIN = 0.1  # 10% of normal heading PID for fine correction
 
 # =============================================================================

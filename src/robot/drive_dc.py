@@ -237,8 +237,8 @@ class RobotDC:
             degrees: Rotation angle (positive = counterclockwise).
             velocity: Peak wheel speed in ticks/sec.
         """
-        if abs(degrees) < 1.0:
-            return  # Too small to bother
+        if abs(degrees) < 2.0:
+            return  # Too small to execute reliably (motor dead zone)
         print(
             f"Turn {degrees:+.1f}° (heading={self._heading:.1f}° → {self._heading + degrees:.1f}°)"
         )
