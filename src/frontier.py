@@ -17,6 +17,11 @@ from robot.config import GRID_RESOLUTION
 
 MIN_CLUSTER_SIZE = 80  # Filter small gaps; real frontiers are larger
 
+# Small obstacle inflation for frontier detection (~4cm at 2cm resolution).
+# Just enough to prevent free_inflation from leaking through thin walls,
+# but much less than the full robot-clearance inflation used for path planning.
+_DETECTION_OBSTACLE_INFLATION = 2
+
 # 8-connected neighbors
 _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
@@ -28,9 +33,8 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     """Detect frontier cells and cluster them via BFS flood-fill.
 
     A frontier cell is a free-inflated cell adjacent to at least one
-    unknown cell. We use zero obstacle inflation here — detection should
-    find ALL frontiers, not just ones the robot can currently reach.
-    Reachability is handled separately by the goal selector.
+    unknown cell. Uses small obstacle inflation to prevent leaking
+    through wall gaps, but much less than path-planning inflation.
 
     Returns:
         Clusters sorted by size (largest first), each a list of (row, col).
@@ -39,12 +43,12 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     log_odds = grid.grid
     rows, cols = log_odds.shape
 
-    # For detection: bridge ray gaps (free inflation) but do NOT inflate
-    # obstacles. This ensures frontiers near wall fragments are still found.
-    traversable = grid.get_traversability_grid(obstacle_inflation=0)
+    traversable = grid.get_traversability_grid(
+        obstacle_inflation=_DETECTION_OBSTACLE_INFLATION
+    )
     unknown_mask = np.abs(log_odds) < 0.1
 
-    # Frontier = free-inflated cell with at least one unknown neighbor
+    # Frontier = traversable cell with at least one unknown neighbor
     frontier_mask = np.zeros((rows, cols), dtype=bool)
     for dr, dc in _NEIGHBORS:
         shifted = np.zeros_like(unknown_mask)
@@ -86,17 +90,12 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
 
 
 def _snap_to_traversable(
-    grid: OccupancyGrid,
     traversable: np.ndarray,
     row: int,
     col: int,
     max_search: int = 200,
 ) -> tuple[int, int] | None:
-    """Find the nearest traversable cell to (row, col) via BFS.
-
-    Returns (row, col) of the nearest traversable cell, or None if
-    nothing found within max_search visited cells.
-    """
+    """Find the nearest traversable cell to (row, col) via BFS."""
     rows, cols = traversable.shape
     if 0 <= row < rows and 0 <= col < cols and traversable[row, col]:
         return (row, col)
@@ -126,13 +125,13 @@ def select_goal(
 ) -> tuple[float, float] | None:
     """Pick the best frontier goal from detected clusters.
 
-    For each cluster:
-    1. Compute the centroid (stable target, usually in open space)
-    2. Snap to nearest traversable cell (full inflation for safe nav)
-    3. Score by path distance + heading penalty
+    For each cluster, finds the closest point to the robot that is at
+    least min_distance_cm away (approaches frontier from explored side).
+    Snaps to nearest traversable cell for safe path planning.
 
     Args:
-        min_distance_cm: Skip goals closer than this.
+        min_distance_cm: Skip points closer than this (avoids picking
+                         frontiers the robot is already sitting on).
 
     Returns:
         (goal_x, goal_y) in world cm, or None if nothing reachable.
@@ -156,17 +155,24 @@ def select_goal(
     best_score = float("inf")
 
     for cluster in clusters:
-        # Centroid of cluster in grid space
-        mean_r = sum(r for r, c in cluster) / len(cluster)
-        mean_c = sum(c for r, c in cluster) / len(cluster)
-        cx, cy = grid.grid_to_world(int(mean_r), int(mean_c))
+        # Find the closest cluster point that's at least min_distance_cm away.
+        # (Don't skip the whole cluster if one edge is too close.)
+        gx, gy = None, None
+        best_dist = float("inf")
+        min_dist_threshold = max(1.0, min_distance_cm)
+        for r, c in cluster:
+            wx, wy = grid.grid_to_world(r, c)
+            d = math.hypot(wx - rx, wy - ry)
+            if d >= min_dist_threshold and d < best_dist:
+                best_dist = d
+                gx, gy = wx, wy
 
-        # Skip if centroid is too close to robot
-        if math.hypot(cx - rx, cy - ry) < max(1.0, min_distance_cm):
+        if gx is None:
             continue
 
-        # Snap centroid to nearest traversable cell
-        snap = _snap_to_traversable(grid, traversable, int(mean_r), int(mean_c))
+        # Snap to nearest traversable cell for path planning
+        goal_rc = grid.world_to_grid(gx, gy)
+        snap = _snap_to_traversable(traversable, goal_rc[0], goal_rc[1])
         if snap is None:
             continue
         goal_rc = snap
@@ -200,20 +206,21 @@ def get_frontier_viz_data(
 ) -> list[dict]:
     """Return frontier data formatted for the web UI.
 
-    Each entry has edge_pt (centroid), size, and cell positions.
+    Each entry has edge_pt (closest point to robot), size, and cell positions.
     """
     rx, ry, _ = robot_pose
     result = []
     for cluster in clusters:
         cells = []
+        cx, cy = None, None
+        min_dist = float("inf")
         for r, c in cluster:
             wx, wy = grid.grid_to_world(r, c)
             cells.append([float(round(wx, 1)), float(round(wy, 1))])
-
-        # Centroid
-        mean_r = sum(r for r, c in cluster) / len(cluster)
-        mean_c = sum(c for r, c in cluster) / len(cluster)
-        cx, cy = grid.grid_to_world(int(mean_r), int(mean_c))
+            d = math.hypot(wx - rx, wy - ry)
+            if d < min_dist:
+                min_dist = d
+                cx, cy = wx, wy
 
         result.append(
             {
