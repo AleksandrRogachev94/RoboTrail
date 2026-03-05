@@ -141,11 +141,36 @@ def select_goal(
         if gx is None or min_cluster_dist < max(1.0, min_distance_cm):
             continue
 
-        # Verify goal is on traversable space
+        # Find a traversable cell near the goal for path planning.
+        # The goal may be outside the full-inflation traversability grid
+        # (detected with reduced inflation), so search nearby.
         goal_rc = grid.world_to_grid(gx, gy)
         gr, gc = goal_rc
-        if not (0 <= gr < rows and 0 <= gc < cols and traversable[gr, gc]):
+        if not (0 <= gr < rows and 0 <= gc < cols):
             continue
+        if not traversable[gr, gc]:
+            # BFS outward to find nearest traversable cell
+            found = False
+            search_q = deque([(gr, gc)])
+            search_visited = {(gr, gc)}
+            while search_q and not found:
+                sr, sc = search_q.popleft()
+                for dr, dc in _NEIGHBORS:
+                    nr, nc = sr + dr, sc + dc
+                    if (nr, nc) in search_visited:
+                        continue
+                    search_visited.add((nr, nc))
+                    if not (0 <= nr < rows and 0 <= nc < cols):
+                        continue
+                    if traversable[nr, nc]:
+                        goal_rc = (nr, nc)
+                        gx, gy = grid.grid_to_world(nr, nc)
+                        found = True
+                        break
+                    if len(search_visited) < 100:  # limit search radius
+                        search_q.append((nr, nc))
+            if not found:
+                continue
 
         # Score = path distance + heading penalty
         path = a_star(traversable, start_rc, goal_rc)
