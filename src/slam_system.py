@@ -283,8 +283,10 @@ class SlamSystem:
 
                         # Sanity cap: reject implausibly large corrections
                         correction_dist = math.hypot(dx, dy)
-                        if correction_dist > 10.0 or abs(corr_angle) > 5.0:
-                            should_update_map = force_update  # force keeps map growing
+                        if correction_dist > 15.0 or abs(corr_angle) > 15.0:
+                            # Still update map with odometry if match is good
+                            # (prevents stagnation when scans keep getting discarded)
+                            should_update_map = force_update or match_pct >= 70
                             self.icp_result = {
                                 "status": "rejected",
                                 "dx": round(dx, 1),
@@ -295,6 +297,7 @@ class SlamSystem:
                             print(
                                 f"ICP rejected: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
                                 f"(too large | match={match_pct:.0f}% err={mean_err:.1f}cm)"
+                                f"{' → updating with odometry' if should_update_map else ''}"
                             )
                         else:
                             corrected_heading = (pose[2] + corr_angle + 180) % 360 - 180
