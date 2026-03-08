@@ -449,7 +449,7 @@ class SlamSystem:
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
         self.explore_goal = goal
-        SCAN_RANGE = 100  # cm — scanner can see this far reliably
+        SCAN_RANGE = 50  # cm — just rotate and scan if frontier is this close
 
         if dist < SCAN_RANGE:
             # Frontier is within scan range — just rotate and scan, no driving
