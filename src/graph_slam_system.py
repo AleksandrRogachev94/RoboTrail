@@ -17,6 +17,7 @@ Usage:
 """
 
 import math
+import threading
 import time
 import traceback
 
@@ -44,6 +45,10 @@ class GraphSlamSystem(SlamSystem):
     LOOP_MAX_DIST_CM = 50.0  # Max distance (cm) to consider loop closure
     LOOP_MIN_MATCH_RATIO = 0.5  # ICP match ratio required for loop closure
 
+    # ICP edge sanity thresholds: reject if ICP disagrees with odometry
+    ICP_MAX_DIST_DIFF = 15.0  # cm — max displacement difference from odometry
+    ICP_MAX_ANGLE_DIFF = 15.0  # degrees — max heading difference from odometry
+
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
         self.pose_graph = PoseGraph()
@@ -52,6 +57,7 @@ class GraphSlamSystem(SlamSystem):
         self._nodes_since_optimize: int = 0
         self._num_optimizations: int = 0
         self._last_optimize_stats: dict | None = None
+        self._grid_lock = threading.Lock()
 
         # Graph data for web UI
         self.graph_info = {
@@ -124,7 +130,8 @@ class GraphSlamSystem(SlamSystem):
             # ── Always update the map with the new scan ────────────
             # This keeps the map fresh for navigation. Optimization
             # will rebuild from scratch with corrected poses later.
-            self.grid.update(scan, pose, free_rays=free_rays)
+            with self._grid_lock:
+                self.grid.update(scan, pose, free_rays=free_rays)
             self.pose = pose
             self.map_version += 1
 
@@ -160,19 +167,39 @@ class GraphSlamSystem(SlamSystem):
                             R_icp, t_icp_vec, prev_pose, pose
                         )
 
+                        # ── Sanity check: reject ICP if it disagrees with odometry ──
+                        dx_diff = abs(icp_transform[0] - odom_transform[0])
+                        dy_diff = abs(icp_transform[1] - odom_transform[1])
+                        dist_diff = math.hypot(dx_diff, dy_diff)
+                        angle_diff = abs(
+                            (icp_transform[2] - odom_transform[2] + 180) % 360 - 180
+                        )
+
+                        icp_sane = (
+                            dist_diff < self.ICP_MAX_DIST_DIFF
+                            and angle_diff < self.ICP_MAX_ANGLE_DIFF
+                        )
+
                         icp_info = PoseGraph.compute_icp_info_matrix(
                             icp_quality["match_ratio"],
                             icp_quality["mean_error"],
                             icp_quality["converged"],
                         )
-                        # Only add edge if info matrix is non-zero
-                        if np.any(icp_info > 0):
+                        # Only add edge if info matrix is non-zero AND sane
+                        edge_added = False
+                        if np.any(icp_info > 0) and icp_sane:
                             self.pose_graph.add_edge(
                                 self._prev_node_id,
                                 node_id,
                                 icp_transform,
                                 "icp_sequential",
                                 icp_info,
+                            )
+                            edge_added = True
+                        elif not icp_sane:
+                            print(
+                                f"ICP rejected (sanity): Δdist={dist_diff:.1f}cm "
+                                f"Δangle={angle_diff:.1f}° vs odometry"
                             )
 
                         self.icp_result = {
@@ -184,7 +211,7 @@ class GraphSlamSystem(SlamSystem):
                             "dx": round(icp_transform[0], 1),
                             "dy": round(icp_transform[1], 1),
                             "dtheta": round(icp_transform[2], 1),
-                            "edge_added": bool(np.any(icp_info > 0)),
+                            "edge_added": edge_added,
                         }
                     else:
                         self.icp_result = {
@@ -212,7 +239,8 @@ class GraphSlamSystem(SlamSystem):
             ):
                 t1 = time.monotonic()
                 stats = self.pose_graph.optimize()
-                self.pose_graph.rebuild_map(self.grid)
+                with self._grid_lock:
+                    self.pose_graph.rebuild_map(self.grid)
                 t_opt = time.monotonic() - t1
 
                 # Update our current pose to the latest optimized pose
@@ -438,6 +466,11 @@ class GraphSlamSystem(SlamSystem):
         return (dx_local, dy_local, dtheta)
 
     # ── Accessors for Web UI ──────────────────────────────────────
+
+    def get_map_data(self):
+        """Thread-safe version of parent's get_map_data."""
+        with self._grid_lock:
+            return super().get_map_data()
 
     def get_graph_data(self) -> dict:
         """Return pose graph data for visualization in the web UI."""
