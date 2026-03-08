@@ -448,10 +448,28 @@ class SlamSystem:
         dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
         print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
 
-        # Navigate to goal
         self.explore_goal = goal
-        self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
-        self._move_scan_update(goal)
+        SCAN_RANGE = 100  # cm — scanner can see this far reliably
+
+        if dist < SCAN_RANGE:
+            # Frontier is within scan range — just rotate and scan, no driving
+            heading_to_goal = math.degrees(
+                math.atan2(gy - self.pose[1], gx - self.pose[0])
+            )
+            heading_error = (heading_to_goal - self.pose[2] + 180) % 360 - 180
+            print(
+                f"Frontier in scan range ({dist:.0f}cm) — rotating {heading_error:.0f}° and scanning"
+            )
+            if abs(heading_error) > 2.0:
+                self.robot.imu.calibrate_gyro(samples=100)
+                self.robot.turn(heading_error)
+                self.pose = self.robot.get_pose()
+            self._scan_and_update(force_update=True)
+        else:
+            # Frontier beyond scan range — drive closer
+            self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
+            self._move_scan_update(goal)
+
         self.explore_goal = None
 
     def _drive_forward_safely(self, distance_cm: float):
