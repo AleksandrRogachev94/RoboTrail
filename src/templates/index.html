@@ -195,9 +195,12 @@
 
 <header>
   <h1>🤖 RoboTrail Dashboard</h1>
-  <div style="font-family:'SF Mono',monospace;font-size:0.85em;">
-    <span style="color:#888">ICP: </span><span id="icp">--</span>
-    <span style="margin-left:16px;color:#888">Graph: </span><span id="graph-hud">--</span>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <button id="explore-btn" onclick="toggleExplore()" style="padding:6px 16px;border:1px solid rgba(102,252,241,0.4);background:rgba(102,252,241,0.1);color:#66fcf1;border-radius:4px;font-family:inherit;font-size:0.85em;font-weight:bold;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all 0.2s;">🔍 Explore</button>
+    <div style="font-family:'SF Mono',monospace;font-size:0.85em;">
+      <span style="color:#888">ICP: </span><span id="icp">--</span>
+      <span style="margin-left:12px;color:#888">Graph: </span><span id="graph-hud">--</span>
+    </div>
   </div>
 </header>
 
@@ -215,8 +218,9 @@
       <div class="leg-item"><div class="leg-box" style="background:#fd79a8"></div>Frontier</div>
       <div class="leg-item"><div class="leg-box" style="background:#a55eea"></div>Planned</div>
       <div class="leg-item"><div class="leg-box" style="background:rgba(52, 152, 219, 0.4)"></div>Traversable</div>
-      <div class="leg-item"><div class="leg-box" style="background:rgba(69,162,158,0.7)"></div>Graph Node</div>
-      <div class="leg-item"><div class="leg-box" style="background:rgba(102,252,241,0.6)"></div>Loop Closure</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(69,162,158,0.8)"></div>Graph Node</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(255,165,0,0.6)"></div>ICP Edge</div>
+      <div class="leg-item"><div class="leg-box" style="background:#f7b731"></div>Loop Closure</div>
     </div>
   </div>
 
@@ -249,12 +253,6 @@
         </div>
       </div>
       <div id="msg">--</div>
-    </div>
-
-    <!-- Controls Card -->
-    <div class="card">
-      <h3>Exploration</h3>
-      <button id="explore-btn" onclick="toggleExplore()">🔍 Start Exploring</button>
     </div>
 
     <!-- Graph SLAM Card -->
@@ -335,11 +333,15 @@ function poll() {
     // Update explore button state
     const btn = document.getElementById('explore-btn');
     if (exploring) {
-      btn.textContent = '⏹ Stop Exploring';
-      btn.classList.add('active');
+      btn.textContent = '⏹ Stop';
+      btn.style.borderColor = 'rgba(252,92,101,0.6)';
+      btn.style.background = 'rgba(252,92,101,0.2)';
+      btn.style.color = '#fc5c65';
     } else {
-      btn.textContent = '🔍 Start Exploring';
-      btn.classList.remove('active');
+      btn.textContent = '🔍 Explore';
+      btn.style.borderColor = 'rgba(102,252,241,0.4)';
+      btn.style.background = 'rgba(102,252,241,0.1)';
+      btn.style.color = '#66fcf1';
     }
 
     // Update system HUD
@@ -371,11 +373,10 @@ function poll() {
     if (d.icp) {
       if (d.icp.status === 'converged') {
         icpEl.style.color = '#4ecca3';
-        // Graph SLAM format has match_ratio/mean_error/edge_added
-        if (d.icp.edge_added !== undefined) {
-          icpEl.textContent = `✓ match=${d.icp.match_ratio}% err=${d.icp.mean_error}cm ${d.icp.edge_added ? '(edge✓)' : '(edge✗)'}`;
+        if (d.icp.dx !== undefined) {
+          icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}° (${d.icp.match_ratio}% ${d.icp.edge_added ? 'edge✓' : 'edge✗'})`;
         } else {
-          icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}°`;
+          icpEl.textContent = `✓ match=${d.icp.match_ratio}% err=${d.icp.mean_error}cm`;
         }
       } else if (d.icp.status === 'failed') {
         icpEl.style.color = '#fc5c65';
@@ -705,15 +706,16 @@ function draw() {
       const [x1, y1] = w2c(nf.x, nf.y);
       const [x2, y2] = w2c(nt.x, nt.y);
       if (e.type === 'loop_closure') {
-        ctx.strokeStyle = 'rgba(102, 252, 241, 0.6)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = '#f7b731';  // Yellow — stands out
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]);
       } else if (e.type === 'icp_sequential') {
-        ctx.strokeStyle = 'rgba(78, 204, 163, 0.3)';
+        ctx.strokeStyle = 'rgba(255, 165, 0, 0.4)';  // Orange
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
       } else {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        // Odometry edges — very subtle
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
       }

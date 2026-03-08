@@ -37,7 +37,7 @@ class GraphSlamSystem(SlamSystem):
     """
 
     # How often to run graph optimization (every N nodes added)
-    OPTIMIZE_EVERY_N = 3
+    OPTIMIZE_EVERY_N = 1
 
     # Loop closure detection parameters
     LOOP_MIN_NODE_GAP = 10  # Minimum nodes between current and candidate
@@ -181,6 +181,9 @@ class GraphSlamSystem(SlamSystem):
                             else "failed",
                             "match_ratio": round(icp_quality["match_ratio"] * 100),
                             "mean_error": round(icp_quality["mean_error"], 1),
+                            "dx": round(icp_transform[0], 1),
+                            "dy": round(icp_transform[1], 1),
+                            "dtheta": round(icp_transform[2], 1),
                             "edge_added": bool(np.any(icp_info > 0)),
                         }
                     else:
