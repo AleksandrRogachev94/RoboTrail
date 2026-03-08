@@ -493,18 +493,20 @@ class GraphSlamSystem(SlamSystem):
                     f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f}), {dist:.0f}cm away, "
                     f"will match heading {target_pos[2]:.0f}°"
                 )
-                # Drive to the old node's position
-                self._move_scan_update(target_pos[:2])
 
-                # Rotate to match the old node's heading for maximum scan overlap
+                # Drive directly — no intermediate scans (just transit)
+                self._drive_to_without_scanning(target_pos[:2])
+
+                # Rotate to match the old node's heading for max scan overlap
                 heading_error = (target_pos[2] - self.pose[2] + 180) % 360 - 180
                 if abs(heading_error) > 5.0:
                     print(f"🔄 Matching heading: turning {heading_error:.0f}°")
                     self.robot.imu.calibrate_gyro(samples=100)
                     self.robot.turn(heading_error)
                     self.pose = self.robot.get_pose()
-                    # Scan again with matched heading
-                    self._scan_and_update(force_update=True)
+
+                # Single scan at the destination with matched heading
+                self._scan_and_update(force_update=True)
                 return
             else:
                 print("🔄 Active loop closure: no suitable target found")
@@ -540,6 +542,49 @@ class GraphSlamSystem(SlamSystem):
                 best = (node.pose, nid)
 
         return best
+
+    def _drive_to_without_scanning(self, target: tuple):
+        """Drive to target without intermediate scans (for loop closure transit).
+
+        Uses path planning for obstacle avoidance but skips scanning at
+        each waypoint — just drives through them.
+        """
+        tx, ty = target
+        from path_planner import plan_path
+
+        for step_i in range(20):  # safety limit
+            dist = math.hypot(tx - self.pose[0], ty - self.pose[1])
+            if dist < self.ARRIVAL_THRESHOLD:
+                print(f"🔄 Arrived at loop closure target (dist={dist:.1f}cm)")
+                break
+
+            waypoints = plan_path(
+                self.grid,
+                (self.pose[0], self.pose[1]),
+                (tx, ty),
+                max_segment_cm=999,  # no subdivision — just drive
+            )
+            if waypoints is None or len(waypoints) < 2:
+                print("🔄 No path to loop closure target")
+                break
+
+            next_x, next_y = waypoints[1]
+            try:
+                self.robot.imu.calibrate_gyro(samples=100)
+                self.state = "MOVING"
+                self.message = f"Transit → ({tx:.0f}, {ty:.0f})"
+                self.robot.move_to(next_x, next_y)
+                self.pose = self.robot.get_pose()
+                self.robot.set_pose(
+                    self.pose[0],
+                    self.pose[1],
+                    (self.pose[2] + 180) % 360 - 180,
+                )
+                self.pose = self.robot.get_pose()
+                self.path_history.append((self.pose[0], self.pose[1]))
+            except Exception as e:
+                print(f"🔄 Drive failed: {e}")
+                break
 
     # ── Accessors for Web UI ──────────────────────────────────────
 

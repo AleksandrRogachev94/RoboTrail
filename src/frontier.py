@@ -119,9 +119,9 @@ def select_goal(
 ) -> tuple[float, float] | None:
     """Pick the best frontier goal from detected clusters.
 
-    For each cluster, finds the closest point to the robot that is at
-    least min_distance_cm away (approaches frontier from explored side).
-    Snaps to nearest traversable cell for safe path planning.
+    Pre-sorts clusters by straight-line distance to the robot and only
+    evaluates the closest few with A*, stopping early once a good
+    reachable goal is found.
 
     Args:
         min_distance_cm: Skip points closer than this (avoids picking
@@ -145,12 +145,11 @@ def select_goal(
     c_lo, c_hi = max(0, sc - CLEAR_R), min(cols, sc + CLEAR_R + 1)
     traversable[r_lo:r_hi, c_lo:c_hi] = True
 
-    best_goal = None
-    best_score = float("inf")
     min_dist_threshold = max(1.0, min_distance_cm)
 
+    # Pre-compute closest point per cluster and sort by distance
+    candidates = []
     for cluster in clusters:
-        # Find the closest cluster point that's at least min_distance_cm away.
         gx, gy = None, None
         best_dist = float("inf")
         for r, c in cluster:
@@ -159,10 +158,18 @@ def select_goal(
             if d >= min_dist_threshold and d < best_dist:
                 best_dist = d
                 gx, gy = wx, wy
+        if gx is not None:
+            candidates.append((best_dist, gx, gy))
 
-        if gx is None:
-            continue
+    # Sort by straight-line distance — closest first
+    candidates.sort()
 
+    # Only A* the top 5 closest — avoids expensive path planning on distant clusters
+    MAX_EVAL = 5
+    best_goal = None
+    best_score = float("inf")
+
+    for _, gx, gy in candidates[:MAX_EVAL]:
         # Snap to nearest traversable cell for path planning
         goal_rc = grid.world_to_grid(gx, gy)
         snap = _snap_to_traversable(traversable, goal_rc[0], goal_rc[1])
