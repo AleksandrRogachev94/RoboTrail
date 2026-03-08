@@ -11,7 +11,6 @@ import numpy as np
 
 from occupancy_grid import OccupancyGrid
 from path_planner import a_star
-from robot.config import GRID_RESOLUTION
 
 # ── Constants ──────────────────────────────────────────────────────────
 
@@ -164,10 +163,8 @@ def select_goal(
     # Sort by straight-line distance — closest first
     candidates.sort()
 
-    # Only A* the top 5 closest — avoids expensive path planning on distant clusters
-    MAX_EVAL = 5
-    best_goal = None
-    best_score = float("inf")
+    # Only A* the top 3 closest — return first reachable one
+    MAX_EVAL = 3
 
     for _, gx, gy in candidates[:MAX_EVAL]:
         # Snap to nearest traversable cell for path planning
@@ -183,17 +180,10 @@ def select_goal(
         if path is None:
             continue
 
-        # Score = path distance + heading penalty
-        goal_heading = math.degrees(math.atan2(gy - ry, gx - rx))
-        heading_diff = abs((goal_heading - heading_deg + 180) % 360 - 180)
-        heading_penalty = heading_diff * 0.5  # 0.5cm-equivalent per degree
-        score = len(path) * GRID_RESOLUTION + heading_penalty
+        # First reachable goal wins (already sorted by distance)
+        return (gx, gy)
 
-        if score < best_score:
-            best_score = score
-            best_goal = (gx, gy)
-
-    return best_goal
+    return None
 
 
 # ── Visualization Data ─────────────────────────────────────────────────

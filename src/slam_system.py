@@ -410,7 +410,12 @@ class SlamSystem:
         self.message = "Exploration stopped"
 
     def _explore_loop(self):
-        """One iteration: detect frontiers → select goal → navigate → scan."""
+        """One iteration: detect frontiers → select goal → drive one step → scan.
+
+        Drives only one waypoint per call, then returns so the next call
+        re-detects frontiers with fresh scan data. Prevents driving toward
+        stale or resolved frontiers.
+        """
         self.state = "EXPLORING"
         self.message = "Detecting frontiers..."
         t0 = time.monotonic()
@@ -421,7 +426,6 @@ class SlamSystem:
         # No frontiers found
         if not clusters:
             if self.map_version <= 2:
-                # Early map — drive forward to bootstrap coverage
                 print("No frontiers yet (early map) — driving forward")
                 self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
                 return
@@ -437,13 +441,13 @@ class SlamSystem:
             f"(sizes: {[len(c) for c in clusters[:5]]})"
         )
 
-        # Select best reachable goal (skip goals within ARRIVAL_THRESHOLD)
+        # Select best reachable goal
         t1 = time.monotonic()
         goal = select_goal(
             self.grid,
             clusters,
             self.pose,
-            min_distance_cm=25.0,  # Skip very close frontiers (usually behind obstacles)
+            min_distance_cm=25.0,
         )
         t_goal = time.monotonic() - t1
         print(f"⏱ frontiers={t_frontier:.2f}s goal_select={t_goal:.2f}s")
@@ -468,8 +472,75 @@ class SlamSystem:
 
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
-        self._move_scan_update(goal)
+
+        # Drive ONE waypoint toward goal, then return for re-evaluation
+        self._drive_one_step(goal)
         self.explore_goal = None
+
+    def _drive_one_step(self, target: tuple):
+        """Plan path to target, drive to the first waypoint, and scan."""
+        tx, ty = target
+        from path_planner import plan_path
+
+        start_xy = (self.pose[0], self.pose[1])
+        waypoints = plan_path(self.grid, start_xy, (tx, ty))
+
+        if waypoints is None or len(waypoints) < 2:
+            print(f"No path to ({tx:.0f}, {ty:.0f})")
+            return
+
+        self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
+        next_x, next_y = waypoints[1]
+
+        try:
+            self.robot.imu.calibrate_gyro(samples=100)
+            self.state = "MOVING"
+            self.message = f"Moving to ({next_x:.0f}, {next_y:.0f})..."
+            self.robot.history = []
+            self.robot.move_to(next_x, next_y)
+            self.pose = self.robot.get_pose()
+            self.robot.set_pose(
+                self.pose[0],
+                self.pose[1],
+                (self.pose[2] + 180) % 360 - 180,
+            )
+            self.pose = self.robot.get_pose()
+            self.path_history.append((self.pose[0], self.pose[1]))
+
+            if self.robot.history:
+                h = self.robot.history
+                step = max(1, len(h) // 100)
+                self.pid_summary = {
+                    "t": [round(s["t"], 3) for s in h[::step]],
+                    "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                    "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                    "heading_error": [round(s["heading_error"], 1) for s in h[::step]],
+                }
+        except Exception as e:
+            self.state = "ERROR"
+            self.message = f"Move failed: {e}"
+            traceback.print_exc()
+            return
+
+        # Scan after arriving at waypoint
+        odom_pos = (self.pose[0], self.pose[1])
+        self._scan_and_update()
+
+        corrected_pos = (self.pose[0], self.pose[1])
+        if self.icp_result and self.icp_result.get("status") == "converged":
+            if self.path_history:
+                self.path_history[-1] = corrected_pos
+            self.icp_corrections.append(
+                {
+                    "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
+                    "to": [
+                        round(corrected_pos[0], 1),
+                        round(corrected_pos[1], 1),
+                    ],
+                }
+            )
+
+        self.planned_waypoints = []
 
     def _drive_forward_safely(self, distance_cm: float):
         """Drive forward (with wall check) then scan."""

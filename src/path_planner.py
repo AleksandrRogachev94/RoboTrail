@@ -200,7 +200,7 @@ def plan_path(
     goal_xy: tuple,
     obstacle_inflation: int = _OBSTACLE_INFLATION,
     free_inflation: int = _FREE_INFLATION,
-    max_segment_cm: float = 35.0,
+    max_segment_cm: float = 50.0,
 ) -> list[tuple] | None:
     """Path planning pipeline: A* → simplify → subdivide → world coordinates.
 

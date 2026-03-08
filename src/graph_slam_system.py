@@ -532,8 +532,8 @@ class GraphSlamSystem(SlamSystem):
         best_dist = float("inf")
 
         for nid, node in self.pose_graph.nodes.items():
-            # Must be old enough (at least 5 nodes back)
-            if current_id - nid < 5:
+            # Must be old enough to be a meaningful loop closure
+            if current_id - nid < self.LOOP_MIN_NODE_GAP:
                 continue
             dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
             # At least 30cm away to be worth driving
