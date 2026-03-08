@@ -15,7 +15,7 @@ from robot.config import GRID_RESOLUTION
 
 # ── Constants ──────────────────────────────────────────────────────────
 
-MIN_CLUSTER_SIZE = 80  # Filter small gaps; real frontiers are larger
+MIN_CLUSTER_SIZE = 40  # Filter small gaps; real frontiers are larger
 
 # 8-connected neighbors
 _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
