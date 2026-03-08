@@ -10,10 +10,10 @@ import sys
 
 from flask import Flask, jsonify, render_template, request
 
-from slam_system import SlamSystem
+from graph_slam_system import GraphSlamSystem
 
 app = Flask(__name__)
-slam = SlamSystem()
+slam = GraphSlamSystem()
 
 
 @app.route("/")
@@ -39,6 +39,7 @@ def get_state():
             "exploring": slam._exploring,
             "explore_goal": slam.explore_goal,
             "frontiers": slam.frontier_data,
+            "graph": getattr(slam, "graph_info", None),
         }
     )
 
@@ -71,6 +72,14 @@ def start_explore():
 def stop_explore():
     slam.stop_explore()
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/graph")
+def get_graph():
+    """Return full pose graph data for visualization."""
+    if hasattr(slam, "get_graph_data"):
+        return jsonify(slam.get_graph_data())
+    return jsonify({"error": "Graph SLAM not active"}), 404
 
 
 def shutdown(sig, frame):

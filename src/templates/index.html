@@ -197,6 +197,7 @@
   <h1>🤖 RoboTrail Dashboard</h1>
   <div style="font-family:'SF Mono',monospace;font-size:0.85em;">
     <span style="color:#888">ICP: </span><span id="icp">--</span>
+    <span style="margin-left:16px;color:#888">Graph: </span><span id="graph-hud">--</span>
   </div>
 </header>
 
@@ -214,6 +215,8 @@
       <div class="leg-item"><div class="leg-box" style="background:#fd79a8"></div>Frontier</div>
       <div class="leg-item"><div class="leg-box" style="background:#a55eea"></div>Planned</div>
       <div class="leg-item"><div class="leg-box" style="background:rgba(52, 152, 219, 0.4)"></div>Traversable</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(69,162,158,0.7)"></div>Graph Node</div>
+      <div class="leg-item"><div class="leg-box" style="background:rgba(102,252,241,0.6)"></div>Loop Closure</div>
     </div>
   </div>
 
@@ -254,6 +257,33 @@
       <button id="explore-btn" onclick="toggleExplore()">🔍 Start Exploring</button>
     </div>
 
+    <!-- Graph SLAM Card -->
+    <div class="card">
+      <h3>Graph SLAM</h3>
+      <div class="hud-grid">
+        <div class="hud-item">
+          <span class="hud-lbl">Nodes</span>
+          <span id="g-nodes" class="hud-val">0</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Edges</span>
+          <span id="g-edges" class="hud-val">0</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Optimizations</span>
+          <span id="g-opts" class="hud-val">0</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-lbl">Loop Closures</span>
+          <span id="g-loops" class="hud-val" style="color:#66fcf1">0</span>
+        </div>
+        <div class="hud-item" style="grid-column: span 2;">
+          <span class="hud-lbl">Last Optimization</span>
+          <span id="g-last-opt" class="hud-val" style="font-size:0.8em">—</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Diagnostics Card -->
     <div class="card">
       <h3>Motion Diagnostics</h3>
@@ -284,6 +314,7 @@ let icpCorr = [];       // [{from, to}, ...] ICP corrections
 let frontiers = [];     // [{centroid, size, cells}, ...]
 let exploreGoal = null; // [x, y] current explore target
 let exploring = false;  // whether in explore mode
+let graphData = null;   // {nodes, edges, ...} pose graph data
 
 // ── Single unified poll ──────────────────────────────────────────
 
@@ -335,21 +366,49 @@ function poll() {
 
     document.getElementById('msg').textContent = d.message || "Idle";
 
-    // Header ICP Status
+    // Header ICP Status — handle both greedy and graph SLAM formats
     const icpEl = document.getElementById('icp');
     if (d.icp) {
       if (d.icp.status === 'converged') {
         icpEl.style.color = '#4ecca3';
-        icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}° (${d.icp.map_pts} map pts)`;
+        // Graph SLAM format has match_ratio/mean_error/edge_added
+        if (d.icp.edge_added !== undefined) {
+          icpEl.textContent = `✓ match=${d.icp.match_ratio}% err=${d.icp.mean_error}cm ${d.icp.edge_added ? '(edge✓)' : '(edge✗)'}`;
+        } else {
+          icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}°`;
+        }
       } else if (d.icp.status === 'failed') {
         icpEl.style.color = '#fc5c65';
-        icpEl.textContent = `✗ failed (${d.icp.map_pts} map pts)`;
+        if (d.icp.match_ratio !== undefined) {
+          icpEl.textContent = `✗ match=${d.icp.match_ratio}% err=${d.icp.mean_error}cm`;
+        } else {
+          icpEl.textContent = `✗ failed (${d.icp.map_pts || '?'} map pts)`;
+        }
+      } else if (d.icp.status === 'skipped') {
+        icpEl.style.color = '#888';
+        icpEl.textContent = `⊘ ${d.icp.reason || 'skipped'}`;
       } else if (d.icp.status === 'building_map') {
         icpEl.style.color = '#f7b731';
         icpEl.textContent = 'building initial map...';
       } else {
         icpEl.style.color = '#888';
         icpEl.textContent = d.icp.status;
+      }
+    }
+
+    // Graph SLAM panel
+    if (d.graph) {
+      document.getElementById('g-nodes').textContent = d.graph.num_nodes;
+      document.getElementById('g-edges').textContent = d.graph.num_edges;
+      document.getElementById('g-opts').textContent = d.graph.num_optimizations;
+      document.getElementById('g-loops').textContent = d.graph.loop_closures;
+      const huEl = document.getElementById('graph-hud');
+      huEl.style.color = '#66fcf1';
+      huEl.textContent = `${d.graph.num_nodes}N ${d.graph.num_edges}E`;
+      if (d.graph.last_optimize) {
+        const lo = d.graph.last_optimize;
+        document.getElementById('g-last-opt').textContent =
+          `cost ${lo.initial_cost}→${lo.final_cost} | max Δ=${lo.max_correction}cm`;
       }
     }
 
@@ -369,6 +428,11 @@ function poll() {
     } else {
       draw(); // still redraw for overlays
     }
+  }).catch(() => {});
+
+  // Fetch graph data (separate, less urgent)
+  fetch('/api/graph').then(r => r.json()).then(d => {
+    if (!d.error) graphData = d;
   }).catch(() => {});
 }
 
@@ -627,6 +691,42 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(ex-10, ey); ctx.lineTo(ex+10, ey); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(ex, ey-10); ctx.lineTo(ex, ey+10); ctx.stroke();
     ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI*2); ctx.stroke();
+  }
+
+  // Graph SLAM nodes and edges
+  if (graphData && graphData.nodes && graphData.nodes.length > 0) {
+    const nodeMap = {};
+    for (const n of graphData.nodes) nodeMap[n.id] = n;
+
+    // Draw edges first (behind nodes)
+    for (const e of (graphData.edges || [])) {
+      const nf = nodeMap[e.from], nt = nodeMap[e.to];
+      if (!nf || !nt) continue;
+      const [x1, y1] = w2c(nf.x, nf.y);
+      const [x2, y2] = w2c(nt.x, nt.y);
+      if (e.type === 'loop_closure') {
+        ctx.strokeStyle = 'rgba(102, 252, 241, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+      } else if (e.type === 'icp_sequential') {
+        ctx.strokeStyle = 'rgba(78, 204, 163, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+      } else {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw nodes
+    for (const n of graphData.nodes) {
+      const [nx, ny] = w2c(n.x, n.y);
+      ctx.fillStyle = 'rgba(69, 162, 158, 0.7)';
+      ctx.beginPath(); ctx.arc(nx, ny, 3, 0, Math.PI * 2); ctx.fill();
+    }
   }
 }
 
