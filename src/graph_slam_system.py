@@ -478,19 +478,24 @@ class GraphSlamSystem(SlamSystem):
         # Every N steps, try active loop closure instead of frontier
         if (
             self._explore_steps % self.LOOP_CLOSURE_INTERVAL == 0
-            and self.pose_graph.num_nodes >= self.LOOP_MIN_NODE_GAP + 2
+            and self.pose_graph.num_nodes >= 8
         ):
             target = self._find_loop_closure_target()
             if target is not None:
                 target_pos, target_id = target
+                dist = math.hypot(
+                    target_pos[0] - self.pose[0], target_pos[1] - self.pose[1]
+                )
                 self.state = "EXPLORING"
                 self.message = f"Loop closure → node {target_id}"
                 print(
-                    f"Active loop closure: driving to node {target_id} "
-                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f})"
+                    f"🔄 Active loop closure: driving to node {target_id} "
+                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f}), {dist:.0f}cm away"
                 )
                 self._move_scan_update(target_pos[:2])
                 return
+            else:
+                print("🔄 Active loop closure: no suitable target found")
 
         # Otherwise, normal frontier exploration
         super()._explore_loop()
@@ -499,7 +504,7 @@ class GraphSlamSystem(SlamSystem):
         """Find the best old node to revisit for loop closure.
 
         Picks the spatially closest node that is far enough in the graph
-        (min_node_gap) and reachable via the traversability grid.
+        (min 5 node gap) to be a meaningful loop closure.
 
         Returns:
             ((x, y, heading), node_id) or None.
@@ -513,12 +518,12 @@ class GraphSlamSystem(SlamSystem):
         best_dist = float("inf")
 
         for nid, node in self.pose_graph.nodes.items():
-            # Must be old enough
-            if current_id - nid < self.LOOP_MIN_NODE_GAP:
+            # Must be old enough (at least 5 nodes back)
+            if current_id - nid < 5:
                 continue
             dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
-            # Within reasonable range but not too close
-            if 30 < dist < self.LOOP_MAX_DIST_CM and dist < best_dist:
+            # Closest old node within 150cm (and at least 30cm to be worth driving)
+            if 30 < dist < 150 and dist < best_dist:
                 best_dist = dist
                 best = (node.pose, nid)
 

@@ -69,8 +69,8 @@ TOF_OFFSET_Y = 0.0  # cm (lateral center)
 # Occupancy Grid
 # =============================================================================
 GRID_RESOLUTION = 2.0  # cm per cell
-GRID_SIZE = 500  # cells per side (500 × 500 = 10m × 10m at 2cm resolution)
-GRID_ORIGIN = 250  # Robot starts at cell (250, 250) = center of grid
+GRID_SIZE = 1000  # cells per side (800 × 800 = 16m × 16m at 2cm resolution)
+GRID_ORIGIN = 500  # Robot starts at cell (400, 400) = center of grid
 
 # Log-odds update parameters
 L_OCC = 0.85  # Added when ray HITS a cell (occupied evidence)
