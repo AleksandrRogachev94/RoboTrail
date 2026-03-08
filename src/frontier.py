@@ -17,11 +17,6 @@ from robot.config import GRID_RESOLUTION
 
 MIN_CLUSTER_SIZE = 40  # Filter small gaps; real frontiers are larger
 
-# Small obstacle inflation for frontier detection (~4cm at 2cm resolution).
-# Just enough to prevent free_inflation from leaking through thin walls,
-# but much less than the full robot-clearance inflation used for path planning.
-_DETECTION_OBSTACLE_INFLATION = 2
-
 # 8-connected neighbors
 _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
@@ -32,9 +27,9 @@ _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 
 def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     """Detect frontier cells and cluster them via BFS flood-fill.
 
-    A frontier cell is a free-inflated cell adjacent to at least one
-    unknown cell. Uses small obstacle inflation to prevent leaking
-    through wall gaps, but much less than path-planning inflation.
+    A frontier cell is a traversable cell adjacent to at least one
+    unknown cell. Uses the same traversability grid as A* path planning,
+    so frontiers can only appear in areas the robot can actually reach.
 
     Returns:
         Clusters sorted by size (largest first), each a list of (row, col).
@@ -43,9 +38,8 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     log_odds = grid.grid
     rows, cols = log_odds.shape
 
-    traversable = grid.get_traversability_grid(
-        obstacle_inflation=_DETECTION_OBSTACLE_INFLATION
-    )
+    # Same traversability grid as A* — walls are properly inflated
+    traversable = grid.get_traversability_grid()
     unknown_mask = np.abs(log_odds) < 0.1
 
     # Frontier = traversable cell with at least one unknown neighbor

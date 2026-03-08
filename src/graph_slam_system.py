@@ -49,6 +49,9 @@ class GraphSlamSystem(SlamSystem):
     ICP_MAX_DIST_DIFF = 15.0  # cm — max displacement difference from odometry
     ICP_MAX_ANGLE_DIFF = 15.0  # degrees — max heading difference from odometry
 
+    # Active loop closure: every N exploration steps, drive to an old node
+    LOOP_CLOSURE_INTERVAL = 8
+
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
         self.pose_graph = PoseGraph()
@@ -58,6 +61,7 @@ class GraphSlamSystem(SlamSystem):
         self._num_optimizations: int = 0
         self._last_optimize_stats: dict | None = None
         self._grid_lock = threading.Lock()
+        self._explore_steps: int = 0
 
         # Graph data for web UI
         self.graph_info = {
@@ -464,6 +468,61 @@ class GraphSlamSystem(SlamSystem):
         dtheta = (pose_to[2] - pose_from[2] + 180) % 360 - 180
 
         return (dx_local, dy_local, dtheta)
+
+    # ── Active Loop Closure ───────────────────────────────────────
+
+    def _explore_loop(self):
+        """Override: periodically seek loop closures during exploration."""
+        self._explore_steps += 1
+
+        # Every N steps, try active loop closure instead of frontier
+        if (
+            self._explore_steps % self.LOOP_CLOSURE_INTERVAL == 0
+            and self.pose_graph.num_nodes >= self.LOOP_MIN_NODE_GAP + 2
+        ):
+            target = self._find_loop_closure_target()
+            if target is not None:
+                target_pos, target_id = target
+                self.state = "EXPLORING"
+                self.message = f"Loop closure → node {target_id}"
+                print(
+                    f"Active loop closure: driving to node {target_id} "
+                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f})"
+                )
+                self._move_scan_update(target_pos[:2])
+                return
+
+        # Otherwise, normal frontier exploration
+        super()._explore_loop()
+
+    def _find_loop_closure_target(self) -> tuple[tuple, int] | None:
+        """Find the best old node to revisit for loop closure.
+
+        Picks the spatially closest node that is far enough in the graph
+        (min_node_gap) and reachable via the traversability grid.
+
+        Returns:
+            ((x, y, heading), node_id) or None.
+        """
+        current_id = self.pose_graph.get_latest_node_id()
+        if current_id is None:
+            return None
+
+        rx, ry = self.pose[0], self.pose[1]
+        best = None
+        best_dist = float("inf")
+
+        for nid, node in self.pose_graph.nodes.items():
+            # Must be old enough
+            if current_id - nid < self.LOOP_MIN_NODE_GAP:
+                continue
+            dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
+            # Within reasonable range but not too close
+            if 30 < dist < self.LOOP_MAX_DIST_CM and dist < best_dist:
+                best_dist = dist
+                best = (node.pose, nid)
+
+        return best
 
     # ── Accessors for Web UI ──────────────────────────────────────
 
