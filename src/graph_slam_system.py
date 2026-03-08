@@ -41,8 +41,8 @@ class GraphSlamSystem(SlamSystem):
     OPTIMIZE_EVERY_N = 1
 
     # Loop closure detection parameters
-    LOOP_MIN_NODE_GAP = 10  # Minimum nodes between current and candidate
-    LOOP_MAX_DIST_CM = 50.0  # Max distance (cm) to consider loop closure
+    LOOP_MIN_NODE_GAP = 5  # Minimum nodes between current and candidate
+    LOOP_MAX_DIST_CM = 100.0  # Max distance (cm) to consider loop closure
     LOOP_MIN_MATCH_RATIO = 0.5  # ICP match ratio required for loop closure
 
     # ICP edge sanity thresholds: reject if ICP disagrees with odometry
@@ -399,44 +399,53 @@ class GraphSlamSystem(SlamSystem):
                 candidate_scan_world, current_scan_world
             )
             if result is None:
+                print(f"  Loop candidate {candidate_id}: ICP failed to converge")
                 continue
 
             R_icp, t_icp, icp_quality = result
 
-            # Only accept high-quality loop closures
-            if (
+            # Reject low-quality loop closures
+            if not (
                 icp_quality["converged"]
                 and icp_quality["match_ratio"] >= self.LOOP_MIN_MATCH_RATIO
                 and icp_quality["mean_error"] < 5.0
             ):
-                # Convert ICP result to local-frame transform
-                icp_transform = self._icp_to_local_transform(
-                    R_icp, t_icp, candidate_pose, current_pose
-                )
-
-                icp_info = PoseGraph.compute_icp_info_matrix(
-                    icp_quality["match_ratio"],
-                    icp_quality["mean_error"],
-                    True,
-                )
-                # Boost: loop closures are high-value constraints
-                icp_info *= 2.0
-
-                # Edge: from=candidate → to=current
-                self.pose_graph.add_edge(
-                    candidate_id,
-                    current_node_id,
-                    icp_transform,
-                    "loop_closure",
-                    icp_info,
-                )
-                count += 1
                 print(
-                    f"Loop closure: node {candidate_id} → node {current_node_id} "
+                    f"  Loop candidate {candidate_id}: rejected "
                     f"(match={icp_quality['match_ratio'] * 100:.0f}% "
-                    f"err={icp_quality['mean_error']:.1f}cm)"
+                    f"err={icp_quality['mean_error']:.1f}cm "
+                    f"converged={icp_quality['converged']})"
                 )
-                break  # One loop closure per scan is enough
+                continue
+
+            # Convert ICP result to local-frame transform
+            icp_transform = self._icp_to_local_transform(
+                R_icp, t_icp, candidate_pose, current_pose
+            )
+
+            icp_info = PoseGraph.compute_icp_info_matrix(
+                icp_quality["match_ratio"],
+                icp_quality["mean_error"],
+                True,
+            )
+            # Boost: loop closures are high-value constraints
+            icp_info *= 2.0
+
+            # Edge: from=candidate → to=current
+            self.pose_graph.add_edge(
+                candidate_id,
+                current_node_id,
+                icp_transform,
+                "loop_closure",
+                icp_info,
+            )
+            count += 1
+            print(
+                f"Loop closure: node {candidate_id} → node {current_node_id} "
+                f"(match={icp_quality['match_ratio'] * 100:.0f}% "
+                f"err={icp_quality['mean_error']:.1f}cm)"
+            )
+            break  # One loop closure per scan is enough
 
         return count
 
