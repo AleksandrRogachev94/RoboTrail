@@ -156,13 +156,6 @@ def select_goal(
     min_dist_threshold = max(1.0, min_distance_cm)
 
     for cluster in clusters:
-        # Skip cluster if robot is already inside it (near centroid)
-        mean_r = sum(r for r, c in cluster) / len(cluster)
-        mean_c = sum(c for r, c in cluster) / len(cluster)
-        cx, cy = grid.grid_to_world(int(mean_r), int(mean_c))
-        if math.hypot(cx - rx, cy - ry) < min_dist_threshold:
-            continue
-
         # Find the closest cluster point that's at least min_distance_cm away.
         gx, gy = None, None
         best_dist = float("inf")

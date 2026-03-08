@@ -249,7 +249,6 @@ class RobotDC:
 
         target_heading = self._heading + degrees
         total_angle = abs(degrees)
-        direction = 1.0 if degrees > 0 else -1.0
 
         t = 0.0
         # Timeout: generous limit to prevent infinite rotation
@@ -271,17 +270,20 @@ class RobotDC:
             omega = self._update_heading(dt_actual)
 
             # How far we've turned so far
-            angle_traveled = total_angle - abs(target_heading - self._heading)
-            angle_traveled = max(0.0, angle_traveled)
+            heading_error = target_heading - self._heading
+            angle_traveled = total_angle - abs(heading_error)
+            angle_traveled = max(0.0, min(angle_traveled, total_angle))
 
             # Trapezoidal velocity profile (primary controller)
             factor = self._speed_factor(
                 angle_traveled, total_angle, RAMP_ANGLE_DEG, MIN_TURN_FACTOR
             )
-            profiled_vel = direction * velocity * factor
+            # Use heading error sign for direction — if robot overshoots,
+            # this naturally reverses instead of pushing further past target
+            error_direction = 1.0 if heading_error > 0 else -1.0
+            profiled_vel = error_direction * velocity * factor
 
             # Fine correction PID (small adjustments only)
-            heading_error = target_heading - self._heading
             fine_correction = self.heading_pid.update(heading_error, dt_actual)
             fine_correction *= TURN_PID_FINE_GAIN
 
