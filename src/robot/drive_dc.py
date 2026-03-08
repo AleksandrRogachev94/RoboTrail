@@ -278,9 +278,12 @@ class RobotDC:
             factor = self._speed_factor(
                 angle_traveled, total_angle, RAMP_ANGLE_DEG, MIN_TURN_FACTOR
             )
-            # Use heading error sign for direction — if robot overshoots,
-            # this naturally reverses instead of pushing further past target
-            error_direction = 1.0 if heading_error > 0 else -1.0
+
+            # Smooth direction multiplier to prevent bang-bang oscillation
+            # when crossing the target heading. Instead of snapping +1 to -1,
+            # scale down proportionally within the last 5 degrees.
+            error_direction = max(-1.0, min(1.0, heading_error / 5.0))
+
             profiled_vel = error_direction * velocity * factor
 
             # Fine correction PID (small adjustments only)

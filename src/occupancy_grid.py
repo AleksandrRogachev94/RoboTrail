@@ -197,6 +197,11 @@ class OccupancyGrid:
                 ray = self.bresenham(sensor_row, sensor_col, end_row, end_col)
                 for r, c in ray:
                     if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+                        # Stop free ray if it hits a known obstacle. This prevents
+                        # sensor misreads from punching holes through solid walls
+                        # and creating phantom frontiers in the unknown space behind them.
+                        if self.grid[r, c] > 0.0:
+                            break
                         self.grid[r, c] -= L_FREE
 
         # ── Robot footprint: the robot is here, so it's definitely free ──
