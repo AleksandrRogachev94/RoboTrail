@@ -309,7 +309,7 @@ class GraphSlamSystem(SlamSystem):
 
         t0 = time.monotonic()
         R, t_vec, _, converged, info = icp(
-            source_scan_world, target_scan_world, max_distance=10
+            source_scan_world, target_scan_world, max_distance=20
         )
         t_elapsed = time.monotonic() - t0
 
@@ -394,9 +394,21 @@ class GraphSlamSystem(SlamSystem):
                 candidate_node.scan_points, candidate_pose
             )
 
-            # ICP: align candidate → current (source=candidate, target=current)
-            result = self._run_scan_to_scan_icp(
-                candidate_scan_world, current_scan_world
+            # ICP with wider max_distance for loop closure (more drift expected)
+            if len(candidate_scan_world) < 5 or len(current_scan_world) < 5:
+                continue
+            R_icp, t_icp, _, converged, info = icp(
+                candidate_scan_world, current_scan_world, max_distance=30
+            )
+            icp_quality = {
+                "match_ratio": info.get("match_ratio", 0),
+                "mean_error": info.get("mean_error", 0),
+                "converged": converged,
+            }
+            result = (
+                (R_icp, t_icp, icp_quality)
+                if converged or info.get("match_ratio", 0) > 0
+                else None
             )
             if result is None:
                 print(f"  Loop candidate {candidate_id}: ICP failed to converge")
