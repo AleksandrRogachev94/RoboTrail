@@ -275,11 +275,12 @@ def icp(
         total_t = R @ total_t + t
         total_R = R @ total_R
 
-        # Step 5: Check convergence
+        # Step 5: Check convergence — separate thresholds for angle and translation
         angle_change = np.arccos(np.clip(R[0, 0], -1, 1))
         translation_change = np.linalg.norm(t)
 
-        if angle_change < tolerance and translation_change < tolerance:
+        # 1e-3 rad ≈ 0.06° for angle, 0.05 cm = 0.5mm for translation
+        if angle_change < 1e-3 and translation_change < 0.05:
             info = {
                 "match_ratio": len(matched_source) / len(source),
                 "mean_error": float(dists.mean()),
