@@ -39,8 +39,9 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
 
     # Same traversability grid as A* — walls are properly inflated
     traversable = grid.get_traversability_grid()
-    prob_map = grid.get_probability_map()
-    observed_free = prob_map < 0.3  # Actually scanned as free (not just inflated)
+    observed_free = (
+        log_odds < -0.1
+    )  # Negative log_odds = ray passed through at least once
     unknown_mask = np.abs(log_odds) < 0.1
 
     # Frontier = observed-free AND traversable cell with at least one unknown neighbor
