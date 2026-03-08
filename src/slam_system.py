@@ -309,22 +309,40 @@ class SlamSystem:
                                 f"{' → updating with odometry' if should_update_map else ''}"
                             )
                         else:
-                            corrected_heading = (pose[2] + corr_angle + 180) % 360 - 180
-                            self.robot.set_pose(
-                                corr_pos[0], corr_pos[1], corrected_heading
-                            )
-                            pose = self.robot.get_pose()
-                            self.icp_result = {
-                                "status": "converged",
-                                "dx": round(dx, 1),
-                                "dy": round(dy, 1),
-                                "dtheta": round(corr_angle, 1),
-                                "map_pts": len(map_points),
-                            }
-                            print(
-                                f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
-                                f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
-                            )
+                            if match_pct < 40:
+                                # Low match = unreliable correction (not enough reference points).
+                                # Treat as new territory — update map with odometry, don't apply correction.
+                                should_update_map = True
+                                self.icp_result = {
+                                    "status": "low_match",
+                                    "dx": round(dx, 1),
+                                    "dy": round(dy, 1),
+                                    "dtheta": round(corr_angle, 1),
+                                    "map_pts": len(map_points),
+                                }
+                                print(
+                                    f"ICP low match — using odometry: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
+                                    f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
+                                )
+                            else:
+                                corrected_heading = (
+                                    pose[2] + corr_angle + 180
+                                ) % 360 - 180
+                                self.robot.set_pose(
+                                    corr_pos[0], corr_pos[1], corrected_heading
+                                )
+                                pose = self.robot.get_pose()
+                                self.icp_result = {
+                                    "status": "converged",
+                                    "dx": round(dx, 1),
+                                    "dy": round(dy, 1),
+                                    "dtheta": round(corr_angle, 1),
+                                    "map_pts": len(map_points),
+                                }
+                                print(
+                                    f"ICP converged: dx={dx:.1f} dy={dy:.1f} dθ={corr_angle:.1f}° "
+                                    f"(match={match_pct:.0f}% err={mean_err:.1f}cm map={len(map_points)})"
+                                )
                     else:
                         match_pct = icp_info.get("match_ratio", 0) * 100
                         mean_err = icp_info.get("mean_error", 0)

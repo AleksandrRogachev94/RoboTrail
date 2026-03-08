@@ -185,7 +185,7 @@ def icp(
     source,
     target,
     max_iterations=50,
-    tolerance=1e-4,
+    tolerance=1e-3,
     max_distance=0.5,
     use_point_to_line=True,
 ):
