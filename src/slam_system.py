@@ -132,11 +132,13 @@ class SlamSystem:
             # Initial scan at origin — front half
             self._scan_and_update(force_update=True)
 
-            # Turn 180° and scan again for full 360° coverage
-            self.robot.imu.calibrate_gyro(samples=100)
-            self.robot.turn(180)
-            self.pose = self.robot.get_pose()
-            self._scan_and_update(force_update=True)
+            # Three 90° turns + scans for full 360° coverage.
+            # 90° rotations give 50% scan overlap → ICP stays happy.
+            for i in range(3):
+                self.robot.imu.calibrate_gyro(samples=100)
+                self.robot.turn(90)
+                self.pose = self.robot.get_pose()
+                self._scan_and_update(force_update=True)
 
             self.state = "IDLE"
             self.message = "Ready"
@@ -329,21 +331,17 @@ class SlamSystem:
                         # Low match ratio means the robot is facing unexplored space —
                         # there aren't enough reference points to match against, not
                         # that the pose is wrong. Trust odometry in this case.
-                        # High match ratio = scan is valid even if ICP didn't converge;
-                        # update map with odometry pose to keep frontiers growing.
+                        # High match + no convergence is DANGEROUS — the scan overlaps
+                        # existing walls but ICP can't find alignment. Adding with raw
+                        # odometry creates maximum ghosting. Don't add it.
                         in_new_territory = match_pct < 30
-                        high_confidence = match_pct >= 70
-                        should_update_map = (
-                            force_update or in_new_territory or high_confidence
-                        )
+                        should_update_map = force_update or in_new_territory
                         self.icp_result = {
                             "status": "failed",
                             "map_pts": len(map_points),
                         }
                         if in_new_territory:
                             reason = "new territory"
-                        elif high_confidence:
-                            reason = "no convergence, using odometry"
                         else:
                             reason = "localization uncertain"
                         print(
