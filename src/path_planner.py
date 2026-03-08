@@ -155,6 +155,41 @@ def simplify_path(path: list[tuple], traversability: np.ndarray) -> list[tuple]:
 
 
 # =============================================================================
+# Segment Subdivision
+# =============================================================================
+
+
+def _subdivide_long_segments(
+    waypoints: list[tuple],
+    max_len_cm: float,
+) -> list[tuple]:
+    """Split waypoint segments longer than max_len_cm into equal sub-segments.
+
+    This ensures the robot scans frequently enough during long straight
+    drives to maintain good scan-to-scan overlap for ICP.
+    """
+    if len(waypoints) < 2:
+        return waypoints
+
+    result = [waypoints[0]]
+    for i in range(1, len(waypoints)):
+        x0, y0 = result[-1]
+        x1, y1 = waypoints[i]
+        seg_len = math.hypot(x1 - x0, y1 - y0)
+
+        if seg_len > max_len_cm:
+            # Split into n equal parts
+            n = math.ceil(seg_len / max_len_cm)
+            for j in range(1, n):
+                t = j / n
+                result.append((x0 + t * (x1 - x0), y0 + t * (y1 - y0)))
+
+        result.append((x1, y1))
+
+    return result
+
+
+# =============================================================================
 # Top-Level API
 # =============================================================================
 
@@ -165,8 +200,9 @@ def plan_path(
     goal_xy: tuple,
     obstacle_inflation: int = _OBSTACLE_INFLATION,
     free_inflation: int = _FREE_INFLATION,
+    max_segment_cm: float = 35.0,
 ) -> list[tuple] | None:
-    """Path planning pipeline: A* → simplify → world coordinates.
+    """Path planning pipeline: A* → simplify → subdivide → world coordinates.
 
     Inflation defaults are derived from ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM
     in config.py and can be overridden for testing.
@@ -177,6 +213,8 @@ def plan_path(
         goal_xy: (x, y) goal position in world cm.
         obstacle_inflation: Cells to inflate obstacles by (default from config).
         free_inflation: Cells to inflate free space by (default from config).
+        max_segment_cm: Max distance between waypoints. Longer segments are
+                        subdivided to ensure good scan overlap for ICP.
 
     Returns:
         List of (x, y) world-coordinate waypoints, or None if no path.
@@ -209,5 +247,8 @@ def plan_path(
 
     # Step 5: Convert to world coordinates
     waypoints = [grid.grid_to_world(r, c) for r, c in simplified]
+
+    # Step 6: Subdivide long segments for better scan overlap
+    waypoints = _subdivide_long_segments(waypoints, max_segment_cm)
 
     return waypoints

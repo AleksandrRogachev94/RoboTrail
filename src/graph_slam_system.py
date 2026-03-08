@@ -50,7 +50,7 @@ class GraphSlamSystem(SlamSystem):
     ICP_MAX_ANGLE_DIFF = 15.0  # degrees — max heading difference from odometry
 
     # Active loop closure: every N exploration steps, drive to an old node
-    LOOP_CLOSURE_INTERVAL = 8
+    LOOP_CLOSURE_INTERVAL = 5
 
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
@@ -490,9 +490,21 @@ class GraphSlamSystem(SlamSystem):
                 self.message = f"Loop closure → node {target_id}"
                 print(
                     f"🔄 Active loop closure: driving to node {target_id} "
-                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f}), {dist:.0f}cm away"
+                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f}), {dist:.0f}cm away, "
+                    f"will match heading {target_pos[2]:.0f}°"
                 )
+                # Drive to the old node's position
                 self._move_scan_update(target_pos[:2])
+
+                # Rotate to match the old node's heading for maximum scan overlap
+                heading_error = (target_pos[2] - self.pose[2] + 180) % 360 - 180
+                if abs(heading_error) > 5.0:
+                    print(f"🔄 Matching heading: turning {heading_error:.0f}°")
+                    self.robot.imu.calibrate_gyro(samples=100)
+                    self.robot.turn(heading_error)
+                    self.pose = self.robot.get_pose()
+                    # Scan again with matched heading
+                    self._scan_and_update(force_update=True)
                 return
             else:
                 print("🔄 Active loop closure: no suitable target found")
@@ -522,8 +534,8 @@ class GraphSlamSystem(SlamSystem):
             if current_id - nid < 5:
                 continue
             dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
-            # Closest old node within 150cm (and at least 30cm to be worth driving)
-            if 30 < dist < 150 and dist < best_dist:
+            # At least 30cm away to be worth driving
+            if dist > 30 and dist < best_dist:
                 best_dist = dist
                 best = (node.pose, nid)
 
