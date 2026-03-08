@@ -15,7 +15,7 @@ from robot.config import GRID_RESOLUTION
 
 # ── Constants ──────────────────────────────────────────────────────────
 
-MIN_CLUSTER_SIZE = 80  # Filter small gaps; real frontiers are larger
+MIN_CLUSTER_SIZE = 40  # Filter small gaps; real frontiers are larger
 
 # Small obstacle inflation for frontier detection (~4cm at 2cm resolution).
 # Just enough to prevent free_inflation from leaking through thin walls,
