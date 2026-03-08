@@ -129,8 +129,15 @@ class SlamSystem:
             self.robot = RobotDC(self.chip)
             self.scanner = Scanner()
 
-            # Initial scan at origin
+            # Initial scan at origin — front half
             self._scan_and_update(force_update=True)
+
+            # Turn 180° and scan again for full 360° coverage
+            self.robot.imu.calibrate_gyro(samples=100)
+            self.robot.turn(180)
+            self.pose = self.robot.get_pose()
+            self._scan_and_update(force_update=True)
+
             self.state = "IDLE"
             self.message = "Ready"
             print("Hardware ready.")
