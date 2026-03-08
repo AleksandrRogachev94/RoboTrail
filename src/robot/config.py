@@ -30,7 +30,7 @@ MAX_FORWARD_VELOCITY = 700  # ticks/sec max wheel speed
 DT = 0.02  # 50Hz control loop
 
 # Forward motion profile
-RAMP_DISTANCE_CM = 8.0  # Ramp up/down over this distance
+RAMP_DISTANCE_CM = 4.0  # Ramp up/down over this distance
 MIN_SPEED_FACTOR = 0.3  # Minimum speed during ramp (30% of target)
 
 # Turn profile
