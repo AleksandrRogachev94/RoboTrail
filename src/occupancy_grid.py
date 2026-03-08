@@ -199,6 +199,13 @@ class OccupancyGrid:
                     if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
                         self.grid[r, c] -= L_FREE
 
+        # ── Robot footprint: the robot is here, so it's definitely free ──
+        robot_row, robot_col = self.world_to_grid(robot_pose[0], robot_pose[1])
+        r = int(math.ceil(ROBOT_RADIUS_CM / GRID_RESOLUTION))
+        r_lo, r_hi = max(0, robot_row - r), min(GRID_SIZE, robot_row + r + 1)
+        c_lo, c_hi = max(0, robot_col - r), min(GRID_SIZE, robot_col + r + 1)
+        self.grid[r_lo:r_hi, c_lo:c_hi] -= L_FREE
+
         np.clip(self.grid, L_MIN, L_MAX, out=self.grid)
 
     # ── Queries ─────────────────────────────────────────────────────────
