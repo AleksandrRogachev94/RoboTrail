@@ -316,6 +316,8 @@ class PoseGraph:
             max_correction = max(max_correction, correction)
 
             # Update the node's pose with the optimized values
+            # Normalize heading to [-180, 180] to prevent accumulation
+            new_th_deg = (new_th_deg + 180) % 360 - 180
             self.nodes[nid].pose = (new_x, new_y, new_th_deg)
 
         final_cost = float(result.cost)

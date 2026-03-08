@@ -37,7 +37,7 @@ class GraphSlamSystem(SlamSystem):
     """
 
     # How often to run graph optimization (every N nodes added)
-    OPTIMIZE_EVERY_N = 5
+    OPTIMIZE_EVERY_N = 3
 
     # Loop closure detection parameters
     LOOP_MIN_NODE_GAP = 10  # Minimum nodes between current and candidate
@@ -65,11 +65,7 @@ class GraphSlamSystem(SlamSystem):
     # ── Override: Initial Hardware Setup ───────────────────────────
 
     def _init_hardware(self):
-        """Initialize hardware and seed pose graph with initial scans.
-
-        Same as parent but records each bootstrap scan as a graph node
-        with an odometry edge between them.
-        """
+        """Initialize hardware and seed pose graph with initial scans."""
         try:
             import lgpio
 
@@ -108,17 +104,12 @@ class GraphSlamSystem(SlamSystem):
     def _scan_and_update(self, force_update=False):
         """Scan, add to pose graph, and periodically optimize.
 
-        Replaces SlamSystem's greedy ICP correction with graph-based approach:
-        1. Take scan
-        2. Add a node to the pose graph
-        3. Add odometry edge from previous node
-        4. Run scan-to-scan ICP → add ICP edge with confidence weight
-        5. Check for loop closure candidates
-        6. Every OPTIMIZE_EVERY_N nodes: optimize + rebuild map
-
-        Args:
-            force_update: If True, also update the working map immediately
-                          (used for bootstrap scans before enough nodes exist).
+        Pipeline:
+        1. Take scan → always add to map (so robot can navigate)
+        2. Add node + odometry edge to pose graph
+        3. Run scan-to-scan ICP → add ICP edge with confidence weight
+        4. Check for loop closure candidates
+        5. Every OPTIMIZE_EVERY_N nodes: optimize + rebuild map from scratch
         """
         self.state = "SCANNING"
         self.message = "Scanning..."
@@ -129,6 +120,13 @@ class GraphSlamSystem(SlamSystem):
             t_scan = time.monotonic() - t0
 
             pose = self.robot.get_pose()
+
+            # ── Always update the map with the new scan ────────────
+            # This keeps the map fresh for navigation. Optimization
+            # will rebuild from scratch with corrected poses later.
+            self.grid.update(scan, pose, free_rays=free_rays)
+            self.pose = pose
+            self.map_version += 1
 
             # ── Add node to pose graph ─────────────────────────────
             node_id = self.pose_graph.add_node(pose, scan, free_rays)
@@ -151,18 +149,23 @@ class GraphSlamSystem(SlamSystem):
                 # ── Scan-to-scan ICP ───────────────────────────────
                 if self.use_icp and self._prev_scan_world is not None:
                     icp_result = self._run_scan_to_scan_icp(
-                        current_scan_world, self._prev_scan_world
+                        self._prev_scan_world, current_scan_world
                     )
                     if icp_result is not None:
-                        icp_transform, icp_quality = icp_result
+                        R_icp, t_icp_vec, icp_quality = icp_result
                         t_icp = icp_quality.get("time", 0)
+
+                        # Convert ICP world-frame result to local-frame transform
+                        icp_transform = self._icp_to_local_transform(
+                            R_icp, t_icp_vec, prev_pose, pose
+                        )
+
                         icp_info = PoseGraph.compute_icp_info_matrix(
                             icp_quality["match_ratio"],
                             icp_quality["mean_error"],
                             icp_quality["converged"],
                         )
                         # Only add edge if info matrix is non-zero
-                        # (compute_icp_info_matrix returns zeros for bad matches)
                         if np.any(icp_info > 0):
                             self.pose_graph.add_edge(
                                 self._prev_node_id,
@@ -187,7 +190,7 @@ class GraphSlamSystem(SlamSystem):
                         }
 
                 # ── Loop closure detection ─────────────────────────
-                n_loops = self._check_loop_closures(node_id, current_scan_world)
+                n_loops = self._check_loop_closures(node_id, current_scan_world, pose)
                 if n_loops > 0:
                     self.graph_info["loop_closures"] += n_loops
                     print(f"Added {n_loops} loop closure edge(s)!")
@@ -210,7 +213,10 @@ class GraphSlamSystem(SlamSystem):
                 t_opt = time.monotonic() - t1
 
                 # Update our current pose to the latest optimized pose
-                self.pose = self.pose_graph.get_corrected_pose(node_id)
+                corrected = self.pose_graph.get_corrected_pose(node_id)
+                # Normalize heading to [-180, 180]
+                norm_heading = (corrected[2] + 180) % 360 - 180
+                self.pose = (corrected[0], corrected[1], norm_heading)
                 self.robot.set_pose(*self.pose)
 
                 self._nodes_since_optimize = 0
@@ -223,12 +229,6 @@ class GraphSlamSystem(SlamSystem):
                     f"Graph optimized: cost {stats['initial_cost']:.1f} → {stats['final_cost']:.1f}, "
                     f"max_correction={stats['max_correction']:.1f}cm ({t_opt:.2f}s)"
                 )
-
-            elif force_update:
-                # During bootstrap, also update the map immediately
-                self.grid.update(scan, pose, free_rays=free_rays)
-                self.pose = pose
-                self.map_version += 1
 
             # ── Update graph info for UI ───────────────────────────
             self.graph_info.update(
@@ -257,37 +257,26 @@ class GraphSlamSystem(SlamSystem):
 
     def _run_scan_to_scan_icp(
         self,
-        current_scan_world: np.ndarray,
-        previous_scan_world: np.ndarray,
-    ) -> tuple[tuple[float, float, float], dict] | None:
-        """Run ICP between two world-frame scans.
+        source_scan_world: np.ndarray,
+        target_scan_world: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, dict] | None:
+        """Run ICP to align source scan to target scan (both in world frame).
 
-        Returns the relative transform FROM previous TO current, matching
-        the edge convention (from_id=prev, to_id=current).
-
-        icp(source, target) aligns source→target, so we call
-        icp(previous, current) to get the prev→current transform.
+        icp(source, target) returns R, t such that R @ source + t ≈ target.
 
         Returns:
-            ((dx, dy, dtheta_deg), quality_dict) or None if too few points.
+            (R, t_vec, quality_dict) or None if too few points.
+            R: 2x2 rotation matrix
+            t_vec: 2D translation vector (world frame)
         """
-        if len(current_scan_world) < 5 or len(previous_scan_world) < 5:
+        if len(source_scan_world) < 5 or len(target_scan_world) < 5:
             return None
 
         t0 = time.monotonic()
-        # icp(source, target) returns R,t that aligns source to target
-        # We want prev→current, so source=previous, target=current
         R, t_vec, _, converged, info = icp(
-            previous_scan_world, current_scan_world, max_distance=10
+            source_scan_world, target_scan_world, max_distance=10
         )
         t_elapsed = time.monotonic() - t0
-
-        # Extract rotation angle from R matrix
-        dtheta_rad = math.atan2(R[1, 0], R[0, 0])
-        dtheta_deg = math.degrees(dtheta_rad)
-
-        # The ICP transform: t_vec is the translation, R is rotation
-        dx, dy = float(t_vec[0]), float(t_vec[1])
 
         quality = {
             "match_ratio": info.get("match_ratio", 0),
@@ -296,23 +285,61 @@ class GraphSlamSystem(SlamSystem):
             "time": t_elapsed,
         }
 
-        return (dx, dy, dtheta_deg), quality
+        return R, t_vec, quality
+
+    def _icp_to_local_transform(
+        self,
+        R_icp: np.ndarray,
+        t_icp: np.ndarray,
+        source_pose: tuple[float, float, float],
+        target_pose: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        """Convert ICP world-frame result to a local-frame relative transform.
+
+        ICP says: R @ source_pts + t ≈ target_pts. This means the source
+        scan should be corrected by (R, t) to match the target. We compute
+        the corrected source pose, then find the relative transform from
+        corrected-source to target in the corrected-source's local frame.
+
+        Args:
+            R_icp: 2x2 rotation from ICP.
+            t_icp: 2D translation from ICP (world frame).
+            source_pose: (x, y, heading_deg) of the source node.
+            target_pose: (x, y, heading_deg) of the target node.
+
+        Returns:
+            (dx_local, dy_local, dtheta_deg) in corrected-source's local frame.
+        """
+        # Correct the source node's position using ICP
+        src_xy = np.array([source_pose[0], source_pose[1]])
+        corrected_xy = R_icp @ src_xy + t_icp
+        dtheta_deg = math.degrees(math.atan2(R_icp[1, 0], R_icp[0, 0]))
+        corrected_src_pose = (
+            float(corrected_xy[0]),
+            float(corrected_xy[1]),
+            source_pose[2] + dtheta_deg,
+        )
+
+        return self._compute_relative_transform(corrected_src_pose, target_pose)
 
     # ── Loop Closure ──────────────────────────────────────────────
 
     def _check_loop_closures(
-        self, current_node_id: int, current_scan_world: np.ndarray
+        self,
+        current_node_id: int,
+        current_scan_world: np.ndarray,
+        current_pose: tuple[float, float, float],
     ) -> int:
         """Check for loop closures and add edges if found.
 
         Args:
             current_node_id: ID of the node just added.
             current_scan_world: Current scan in world frame.
+            current_pose: Current robot pose.
 
         Returns:
             Number of loop closure edges added.
         """
-        current_pose = self.pose_graph.get_corrected_pose(current_node_id)
         candidates = self.pose_graph.find_loop_candidates(
             current_pose,
             min_node_gap=self.LOOP_MIN_NODE_GAP,
@@ -332,16 +359,14 @@ class GraphSlamSystem(SlamSystem):
                 candidate_node.scan_points, candidate_pose
             )
 
-            # Run ICP: _run_scan_to_scan_icp(current, previous)
-            # calls icp(previous, current) → returns transform prev→current
-            # So this gives candidate→current transform
+            # ICP: align candidate → current (source=candidate, target=current)
             result = self._run_scan_to_scan_icp(
-                current_scan_world, candidate_scan_world
+                candidate_scan_world, current_scan_world
             )
             if result is None:
                 continue
 
-            icp_transform, icp_quality = result
+            R_icp, t_icp, icp_quality = result
 
             # Only accept high-quality loop closures
             if (
@@ -349,7 +374,11 @@ class GraphSlamSystem(SlamSystem):
                 and icp_quality["match_ratio"] >= self.LOOP_MIN_MATCH_RATIO
                 and icp_quality["mean_error"] < 5.0
             ):
-                # Use ICP info matrix but boost confidence for loop closures
+                # Convert ICP result to local-frame transform
+                icp_transform = self._icp_to_local_transform(
+                    R_icp, t_icp, candidate_pose, current_pose
+                )
+
                 icp_info = PoseGraph.compute_icp_info_matrix(
                     icp_quality["match_ratio"],
                     icp_quality["mean_error"],
@@ -358,8 +387,7 @@ class GraphSlamSystem(SlamSystem):
                 # Boost: loop closures are high-value constraints
                 icp_info *= 2.0
 
-                # Edge direction: from=candidate → to=current
-                # matches the ICP transform (candidate→current)
+                # Edge: from=candidate → to=current
                 self.pose_graph.add_edge(
                     candidate_id,
                     current_node_id,
@@ -369,7 +397,7 @@ class GraphSlamSystem(SlamSystem):
                 )
                 count += 1
                 print(
-                    f"Loop closure: node {current_node_id} ↔ node {candidate_id} "
+                    f"Loop closure: node {candidate_id} → node {current_node_id} "
                     f"(match={icp_quality['match_ratio'] * 100:.0f}% "
                     f"err={icp_quality['mean_error']:.1f}cm)"
                 )
