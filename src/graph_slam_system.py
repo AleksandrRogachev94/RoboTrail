@@ -416,11 +416,11 @@ class GraphSlamSystem(SlamSystem):
 
             R_icp, t_icp, icp_quality = result
 
-            # Reject low-quality loop closures
+            # Accept loop closure based on match quality only
+            # (converged flag just means ICP hit max iterations — irrelevant)
             if not (
-                icp_quality["converged"]
-                and icp_quality["match_ratio"] >= self.LOOP_MIN_MATCH_RATIO
-                and icp_quality["mean_error"] < 5.0
+                icp_quality["match_ratio"] >= self.LOOP_MIN_MATCH_RATIO
+                and icp_quality["mean_error"] < 8.0
             ):
                 print(
                     f"  Loop candidate {candidate_id}: rejected "

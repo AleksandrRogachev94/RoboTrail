@@ -39,9 +39,12 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
 
     # Same traversability grid as A* — walls are properly inflated
     traversable = grid.get_traversability_grid()
+    prob_map = grid.get_probability_map()
+    observed_free = prob_map < 0.3  # Actually scanned as free (not just inflated)
     unknown_mask = np.abs(log_odds) < 0.1
 
-    # Frontier = traversable cell with at least one unknown neighbor
+    # Frontier = observed-free AND traversable cell with at least one unknown neighbor
+    # Using observed_free prevents phantom frontiers at inflated-free edges
     frontier_mask = np.zeros((rows, cols), dtype=bool)
     for dr, dc in _NEIGHBORS:
         shifted = np.zeros_like(unknown_mask)
@@ -51,7 +54,7 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
         dc_dest = slice(max(0, dc), cols + min(0, dc))
         shifted[dr_dest, dc_dest] = unknown_mask[sr, sc]
         frontier_mask |= shifted
-    frontier_mask &= traversable
+    frontier_mask &= traversable & observed_free
 
     # BFS flood-fill to cluster connected frontier cells
     frontier_cells = set(zip(*np.where(frontier_mask)))
