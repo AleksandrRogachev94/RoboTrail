@@ -79,7 +79,7 @@ class Scanner:
 
         hits = []
         free_rays = []
-        MAX_RANGE = 120  # VL53L1X accuracy degrades beyond this
+        MAX_RANGE = 250  # VL53L1X accuracy degrades beyond this
         for i, angle in enumerate(angles):
             angle_rad = math.radians(angle)
             distance = distances[i]
