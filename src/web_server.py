@@ -24,10 +24,11 @@ def index():
 @app.route("/api/state")
 def get_state():
     """Return pose, status, target."""
+    current_pose = slam.robot.get_pose() if slam.robot else slam.pose
     return jsonify(
         {
             "state": slam.state,
-            "pose": slam.pose,
+            "pose": current_pose,
             "target": slam.target,
             "message": slam.message,
             "map_version": slam.map_version,
@@ -89,6 +90,7 @@ def shutdown(sig, frame):
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown)
+    slam.auto_explore = True
     slam.start()
     # Suppress per-request access logs from werkzeug
     logging.getLogger("werkzeug").setLevel(logging.WARNING)

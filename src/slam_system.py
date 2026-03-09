@@ -112,6 +112,9 @@ class SlamSystem:
         """Main background loop."""
         self._init_hardware()
 
+        if getattr(self, "auto_explore", False):
+            self.explore()
+
         while self._running:
             if self._exploring:
                 self._explore_loop()

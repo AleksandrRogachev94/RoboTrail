@@ -71,6 +71,7 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    image-rendering: pixelated; /* Fixes map focus/blur upscaling */
   }
   #hint {
     position: absolute;
@@ -195,7 +196,7 @@
 
 <header>
   <h1>🤖 RoboTrail Dashboard</h1>
-  <div style="display:flex;align-items:center;gap:16px;">
+  <div style="display:flex;align-items:center;gap:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
     <button id="explore-btn" onclick="toggleExplore()" style="padding:6px 16px;border:1px solid rgba(102,252,241,0.4);background:rgba(102,252,241,0.1);color:#66fcf1;border-radius:4px;font-family:inherit;font-size:0.85em;font-weight:bold;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all 0.2s;">🔍 Explore</button>
     <div style="font-family:'SF Mono',monospace;font-size:0.85em;">
       <span style="color:#888">ICP: </span><span id="icp">--</span>
@@ -374,7 +375,7 @@ function poll() {
       if (d.icp.status === 'converged') {
         icpEl.style.color = '#4ecca3';
         if (d.icp.dx !== undefined) {
-          icpEl.textContent = `✓ dx=${d.icp.dx} dy=${d.icp.dy} dθ=${d.icp.dtheta}° (${d.icp.match_ratio}% ${d.icp.edge_added ? 'edge✓' : 'edge✗'})`;
+          icpEl.textContent = `✓ Δ:${d.icp.dx},${d.icp.dy},${d.icp.dtheta}° (${d.icp.match_ratio}% ${d.icp.edge_added ? '✓' : '✗'})`;
         } else {
           icpEl.textContent = `✓ match=${d.icp.match_ratio}% err=${d.icp.mean_error}cm`;
         }
@@ -710,12 +711,12 @@ function draw() {
         ctx.lineWidth = 2.5;
         ctx.setLineDash([6, 4]);
       } else if (e.type === 'icp_sequential') {
-        ctx.strokeStyle = 'rgba(255, 165, 0, 0.4)';  // Orange
+        ctx.strokeStyle = 'rgba(255, 165, 0, 0.2)';  // Orange more transparent
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
       } else {
         // Odometry edges — very subtle
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
       }
@@ -727,7 +728,7 @@ function draw() {
     for (const n of graphData.nodes) {
       const [nx, ny] = w2c(n.x, n.y);
       ctx.fillStyle = 'rgba(69, 162, 158, 0.7)';
-      ctx.beginPath(); ctx.arc(nx, ny, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(nx, ny, 1.5, 0, Math.PI * 2); ctx.fill();
     }
   }
 }
