@@ -23,8 +23,10 @@ import traceback
 
 import numpy as np
 
+from frontier import find_frontiers, get_frontier_viz_data, select_goal
 from icp import icp
 from occupancy_grid import scan_to_world
+from path_planner import plan_path
 from pose_graph import PoseGraph
 from slam_system import SlamSystem
 
@@ -49,9 +51,6 @@ class GraphSlamSystem(SlamSystem):
     ICP_MAX_DIST_DIFF = 15.0  # cm — max displacement difference from odometry
     ICP_MAX_ANGLE_DIFF = 15.0  # degrees — max heading difference from odometry
 
-    # Active loop closure: every N exploration steps, drive to an old node
-    LOOP_CLOSURE_INTERVAL = 5
-
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
         self.pose_graph = PoseGraph()
@@ -61,7 +60,7 @@ class GraphSlamSystem(SlamSystem):
         self._num_optimizations: int = 0
         self._last_optimize_stats: dict | None = None
         self._grid_lock = threading.Lock()
-        self._explore_steps: int = 0
+        self._recent_loop_targets: set[int] = set()
 
         # Graph data for web UI
         self.graph_info = {
@@ -490,122 +489,170 @@ class GraphSlamSystem(SlamSystem):
 
         return (dx_local, dy_local, dtheta)
 
-    # ── Active Loop Closure ───────────────────────────────────────
+    # ── On-the-Way Loop Closure ─────────────────────────────────────
 
     def _explore_loop(self):
-        """Override: periodically seek loop closures during exploration."""
-        self._explore_steps += 1
+        """Explore frontiers with opportunistic on-the-way loop closure.
 
-        # Every N steps, try active loop closure instead of frontier
-        if (
-            self._explore_steps % self.LOOP_CLOSURE_INTERVAL == 0
-            and self.pose_graph.num_nodes >= 8
-        ):
-            target = self._find_loop_closure_target()
-            if target is not None:
-                target_pos, target_id = target
-                dist = math.hypot(
-                    target_pos[0] - self.pose[0], target_pos[1] - self.pose[1]
-                )
-                self.state = "EXPLORING"
-                self.message = f"Loop closure → node {target_id}"
-                print(
-                    f"🔄 Active loop closure: driving to node {target_id} "
-                    f"at ({target_pos[0]:.0f}, {target_pos[1]:.0f}), {dist:.0f}cm away, "
-                    f"will match heading {target_pos[2]:.0f}°"
-                )
+        Before driving to a frontier, checks if the planned path passes
+        near an old pose graph node. If so, detours to that node for a
+        scan (triggering loop closure detection), then resumes frontier
+        exploration on the next call.
 
-                # Drive directly — no intermediate scans (just transit)
-                self._drive_to_without_scanning(target_pos[:2])
+        When exploration finishes (no frontiers), runs a post-exploration
+        sweep to close any remaining loops.
+        """
+        self.state = "EXPLORING"
+        self.message = "Detecting frontiers..."
 
-                # Rotate to match the old node's heading for max scan overlap
-                heading_error = (target_pos[2] - self.pose[2] + 180) % 360 - 180
-                if abs(heading_error) > 5.0:
-                    print(f"🔄 Matching heading: turning {heading_error:.0f}°")
-                    self.robot.imu.calibrate_gyro(samples=100)
-                    self.robot.turn(heading_error)
-                    self.pose = self.robot.get_pose()
+        t0 = time.monotonic()
+        clusters = find_frontiers(self.grid)
+        t_frontier = time.monotonic() - t0
+        self.frontier_data = get_frontier_viz_data(self.grid, clusters, self.pose)
 
-                # Single scan at the destination with matched heading
-                self._scan_and_update(force_update=True)
+        if not clusters:
+            if self.map_version <= 2:
+                print("No frontiers yet (early map) — driving forward")
+                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
                 return
-            else:
-                print("🔄 Active loop closure: no suitable target found")
+            print("Exploration complete — running post-exploration loop closures")
+            self._post_exploration_loop_closure()
+            self._exploring = False
+            self.explore_goal = None
+            self.state = "IDLE"
+            self.message = "Exploration complete — no frontiers remain!"
+            print("Exploration complete: no frontiers found.")
+            return
 
-        # Otherwise, normal frontier exploration
-        super()._explore_loop()
+        print(
+            f"Found {len(clusters)} frontier clusters "
+            f"(sizes: {[len(c) for c in clusters[:5]]})"
+        )
 
-    def _find_loop_closure_target(self) -> tuple[tuple, int] | None:
-        """Find the best old node to revisit for loop closure.
+        t1 = time.monotonic()
+        goal = select_goal(self.grid, clusters, self.pose, min_distance_cm=25.0)
+        t_goal = time.monotonic() - t1
+        print(f"⏱ frontiers={t_frontier:.2f}s goal_select={t_goal:.2f}s")
 
-        Picks the spatially closest node that is far enough in the graph
-        (min 5 node gap) to be a meaningful loop closure.
+        if goal is None:
+            if self.map_version <= 2:
+                print("No reachable frontiers (early map) — driving forward")
+                self._drive_forward_safely(self.BOOTSTRAP_DRIVE_CM)
+                return
+            print("No reachable frontiers — running post-exploration loop closures")
+            self._post_exploration_loop_closure()
+            self._exploring = False
+            self.explore_goal = None
+            self.state = "IDLE"
+            self.message = "No reachable frontiers — exploration stopped."
+            print("No reachable frontiers.")
+            return
+
+        gx, gy = goal
+        dist = math.hypot(gx - self.pose[0], gy - self.pose[1])
+        print(f"Explore goal: ({gx:.0f}, {gy:.0f}), dist={dist:.0f}cm")
+        self.explore_goal = goal
+        self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
+
+        # Check for on-the-way loop closure before driving
+        if self.pose_graph.num_nodes >= 8:
+            waypoints = plan_path(self.grid, (self.pose[0], self.pose[1]), (gx, gy))
+            if waypoints and len(waypoints) >= 2:
+                loop_node = self._find_loop_node_along_path(waypoints)
+                if loop_node is not None:
+                    print(
+                        f"🔄 On-the-way loop closure: detour to node "
+                        f"{loop_node.id} at ({loop_node.pose[0]:.0f}, "
+                        f"{loop_node.pose[1]:.0f})"
+                    )
+                    self._recent_loop_targets.add(loop_node.id)
+                    self._drive_one_step((loop_node.pose[0], loop_node.pose[1]))
+                    self.explore_goal = None
+                    return
+
+        # Normal: drive one step toward frontier
+        self._drive_one_step(goal)
+        self.explore_goal = None
+
+    def _find_loop_node_along_path(
+        self, waypoints: list[tuple], proximity_cm: float = 40.0
+    ):
+        """Find an old pose graph node near the planned path.
+
+        Selects the node with the largest graph gap (most valuable for
+        loop closure) that is within proximity_cm of any waypoint.
+
+        Args:
+            waypoints: List of (x, y) world-coordinate waypoints.
+            proximity_cm: Max distance from a waypoint to consider.
 
         Returns:
-            ((x, y, heading), node_id) or None.
+            PoseNode or None.
         """
         current_id = self.pose_graph.get_latest_node_id()
         if current_id is None:
             return None
 
-        rx, ry = self.pose[0], self.pose[1]
-        best = None
-        best_dist = float("inf")
+        best_node = None
+        best_gap = 0
 
         for nid, node in self.pose_graph.nodes.items():
-            # Must be old enough to be a meaningful loop closure
-            if current_id - nid < self.LOOP_MIN_NODE_GAP:
+            if nid in self._recent_loop_targets:
                 continue
-            dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
-            # At least 30cm away to be worth driving
-            if dist > 30 and dist < best_dist:
-                best_dist = dist
-                best = (node.pose, nid)
+            graph_gap = current_id - nid
+            if graph_gap < self.LOOP_MIN_NODE_GAP:
+                continue
+            for wx, wy in waypoints[1:]:  # skip start (robot is there)
+                if math.hypot(node.pose[0] - wx, node.pose[1] - wy) < proximity_cm:
+                    if graph_gap > best_gap:
+                        best_gap = graph_gap
+                        best_node = node
+                    break
 
-        return best
+        return best_node
 
-    def _drive_to_without_scanning(self, target: tuple):
-        """Drive to target without intermediate scans (for loop closure transit).
+    def _post_exploration_loop_closure(self, max_targets: int = 3):
+        """After exploration finishes, visit high-value old nodes for loop closure.
 
-        Uses path planning for obstacle avoidance but skips scanning at
-        each waypoint — just drives through them.
+        Targets are scored by graph_gap / spatial_distance — nodes that are
+        far in the graph but near in space offer the most drift correction.
         """
-        tx, ty = target
-        from path_planner import plan_path
+        current_id = self.pose_graph.get_latest_node_id()
+        if current_id is None or current_id < 10:
+            return
 
-        for step_i in range(20):  # safety limit
-            dist = math.hypot(tx - self.pose[0], ty - self.pose[1])
-            if dist < self.ARRIVAL_THRESHOLD:
-                print(f"🔄 Arrived at loop closure target (dist={dist:.1f}cm)")
-                break
+        rx, ry = self.pose[0], self.pose[1]
+        targets = []
 
+        for nid, node in self.pose_graph.nodes.items():
+            graph_gap = current_id - nid
+            if graph_gap < self.LOOP_MIN_NODE_GAP:
+                continue
+            spatial_dist = math.hypot(node.pose[0] - rx, node.pose[1] - ry)
+            if spatial_dist < 30:
+                continue
+            score = graph_gap / (spatial_dist + 1.0)
+            targets.append((score, nid, node))
+
+        targets.sort(reverse=True)
+
+        for score, nid, node in targets[:max_targets]:
             waypoints = plan_path(
                 self.grid,
                 (self.pose[0], self.pose[1]),
-                (tx, ty),
-                max_segment_cm=999,  # no subdivision — just drive
+                (node.pose[0], node.pose[1]),
             )
-            if waypoints is None or len(waypoints) < 2:
-                print("🔄 No path to loop closure target")
-                break
+            if waypoints is None:
+                print(f"🔄 Post-exploration: no path to node {nid}, skipping")
+                continue
 
-            next_x, next_y = waypoints[1]
-            try:
-                self.robot.imu.calibrate_gyro(samples=100)
-                self.state = "MOVING"
-                self.message = f"Transit → ({tx:.0f}, {ty:.0f})"
-                self.robot.move_to(next_x, next_y)
-                self.pose = self.robot.get_pose()
-                self.robot.set_pose(
-                    self.pose[0],
-                    self.pose[1],
-                    (self.pose[2] + 180) % 360 - 180,
-                )
-                self.pose = self.robot.get_pose()
-                self.path_history.append((self.pose[0], self.pose[1]))
-            except Exception as e:
-                print(f"🔄 Drive failed: {e}")
-                break
+            print(
+                f"🔄 Post-exploration loop closure: driving to node {nid} "
+                f"(score={score:.2f})"
+            )
+            self.state = "EXPLORING"
+            self.message = f"Loop closure sweep → node {nid}"
+            self._move_scan_update((node.pose[0], node.pose[1]))
 
     # ── Accessors for Web UI ──────────────────────────────────────
 

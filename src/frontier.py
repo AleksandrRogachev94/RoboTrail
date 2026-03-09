@@ -11,10 +11,17 @@ import numpy as np
 
 from occupancy_grid import OccupancyGrid
 from path_planner import a_star
+from robot.config import GRID_RESOLUTION, OBSTACLE_PADDING_CM, ROBOT_RADIUS_CM
 
 # ── Constants ──────────────────────────────────────────────────────────
 
 MIN_CLUSTER_SIZE = 40  # Filter small gaps; real frontiers are larger
+
+# Obstacle inflation: reduced vs path planning to detect frontiers in narrow passages
+_OBSTACLE_INFLATION = math.ceil(
+    (ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM) / GRID_RESOLUTION
+)
+_FRONTIER_INFLATION = max(1, _OBSTACLE_INFLATION - 2)
 
 # 8-connected neighbors
 _NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
@@ -38,7 +45,7 @@ def find_frontiers(grid: OccupancyGrid) -> list[list[tuple[int, int]]]:
     rows, cols = log_odds.shape
 
     # Same traversability grid as A* — walls are properly inflated
-    traversable = grid.get_traversability_grid()
+    traversable = grid.get_traversability_grid(obstacle_inflation=_FRONTIER_INFLATION)
     observed_free = (
         log_odds < -0.1
     )  # Negative log_odds = ray passed through at least once

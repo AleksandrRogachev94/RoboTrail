@@ -80,13 +80,16 @@ class Scanner:
         hits = []
         free_rays = []
         MAX_RANGE = 250  # VL53L1X accuracy degrades beyond this
+        FREE_RAY_RANGE = 120  # How far to mark as free when no obstacle detected
+
         for i, angle in enumerate(angles):
             angle_rad = math.radians(angle)
             distance = distances[i]
             if distance is None or distance > MAX_RANGE:
-                # No obstacle detected — mark the full ray as free up to MAX_RANGE
-                x = MAX_RANGE * math.cos(angle_rad)
-                y = -MAX_RANGE * math.sin(angle_rad)
+                # No obstacle detected — mark a shorter safe distance as free.
+                # If we mark all 250cm as free, sensor misses punch huge holes through walls.
+                x = FREE_RAY_RANGE * math.cos(angle_rad)
+                y = -FREE_RAY_RANGE * math.sin(angle_rad)
                 free_rays.append([x, y])
             else:
                 # Obstacle detected within range
