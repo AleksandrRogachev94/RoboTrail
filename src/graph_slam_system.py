@@ -63,6 +63,7 @@ class GraphSlamSystem(SlamSystem):
         self._last_optimize_stats: dict | None = None
         self._grid_lock = threading.Lock()
         self._loop_closure_pending: bool = False
+        self._recently_closed_ids: set[int] = set()  # Skip redundant ICP retries
 
         # Graph data for web UI
         self.graph_info = {
@@ -266,6 +267,7 @@ class GraphSlamSystem(SlamSystem):
 
                 self._nodes_since_optimize = 0
                 self._num_optimizations += 1
+                self._recently_closed_ids.clear()  # Poses changed; allow re-closure
                 self._last_optimize_stats = stats
                 self._loop_closure_pending = False
                 did_optimize = True
@@ -398,6 +400,8 @@ class GraphSlamSystem(SlamSystem):
 
         count = 0
         for candidate_id in candidates[:3]:  # Try top 3 closest
+            if candidate_id in self._recently_closed_ids:
+                continue
             candidate_node = self.pose_graph.get_node(candidate_id)
             candidate_pose = candidate_node.pose
 
@@ -464,6 +468,7 @@ class GraphSlamSystem(SlamSystem):
                 icp_info,
             )
             count += 1
+            self._recently_closed_ids.add(candidate_id)
             print(
                 f"Loop closure: node {candidate_id} → node {current_node_id} "
                 f"(match={icp_quality['match_ratio'] * 100:.0f}% "
