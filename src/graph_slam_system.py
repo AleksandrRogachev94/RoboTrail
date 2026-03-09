@@ -62,9 +62,7 @@ class GraphSlamSystem(SlamSystem):
         self._num_optimizations: int = 0
         self._last_optimize_stats: dict | None = None
         self._grid_lock = threading.Lock()
-        self._recent_loop_targets: set[int] = set()
         self._loop_closure_pending: bool = False
-        self._failed_loop_regions: list[tuple[float, float]] = []  # (x, y) positions
 
         # Graph data for web UI
         self.graph_info = {
@@ -569,74 +567,11 @@ class GraphSlamSystem(SlamSystem):
         self.explore_goal = goal
         self.message = f"Exploring → ({gx:.0f}, {gy:.0f})"
 
-        # Check for on-the-way loop closure before driving
-        if self.pose_graph.num_nodes >= 8:
-            waypoints = plan_path(self.grid, (self.pose[0], self.pose[1]), (gx, gy))
-            if waypoints and len(waypoints) >= 2:
-                loop_node = self._find_loop_node_along_path(waypoints)
-                if loop_node is not None:
-                    nx, ny = loop_node.pose[0], loop_node.pose[1]
-                    print(
-                        f"🔄 On-the-way loop closure: detour to node "
-                        f"{loop_node.id} at ({nx:.0f}, {ny:.0f})"
-                    )
-                    self._recent_loop_targets.add(loop_node.id)
-                    closures_before = self.graph_info["loop_closures"]
-                    self._drive_one_step((nx, ny))
-                    # If no loop closure was detected, mark this area as failed
-                    if self.graph_info["loop_closures"] == closures_before:
-                        self._failed_loop_regions.append((nx, ny))
-                        print(f"🔄 No closure at ({nx:.0f}, {ny:.0f}) — marking region")
-                    self.explore_goal = None
-                    return
-
-        # Normal: drive one step toward frontier
+        # Drive one step toward frontier.
+        # Passive _check_loop_closures fires after each scan along the way,
+        # handling loop closures automatically when near old nodes.
         self._drive_one_step(goal)
         self.explore_goal = None
-
-    def _find_loop_node_along_path(
-        self, waypoints: list[tuple], proximity_cm: float = 40.0
-    ):
-        """Find an old pose graph node near the planned path.
-
-        Selects the node with the largest graph gap (most valuable for
-        loop closure) that is within proximity_cm of any waypoint.
-
-        Args:
-            waypoints: List of (x, y) world-coordinate waypoints.
-            proximity_cm: Max distance from a waypoint to consider.
-
-        Returns:
-            PoseNode or None.
-        """
-        current_id = self.pose_graph.get_latest_node_id()
-        if current_id is None:
-            return None
-
-        best_node = None
-        best_gap = 0
-
-        for nid, node in self.pose_graph.nodes.items():
-            if nid in self._recent_loop_targets:
-                continue
-            graph_gap = current_id - nid
-            if graph_gap < self.LOOP_MIN_NODE_GAP:
-                continue
-            # Skip nodes near previously failed regions
-            in_failed_region = any(
-                math.hypot(node.pose[0] - fx, node.pose[1] - fy) < 60.0
-                for fx, fy in self._failed_loop_regions
-            )
-            if in_failed_region:
-                continue
-            for wx, wy in waypoints[1:]:  # skip start (robot is there)
-                if math.hypot(node.pose[0] - wx, node.pose[1] - wy) < proximity_cm:
-                    if graph_gap > best_gap:
-                        best_gap = graph_gap
-                        best_node = node
-                    break
-
-        return best_node
 
     def _post_exploration_loop_closure(self, max_targets: int = 3):
         """After exploration finishes, visit high-value old nodes for loop closure.
