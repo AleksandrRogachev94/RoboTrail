@@ -46,7 +46,7 @@ class GraphSlamSystem(SlamSystem):
 
     # Loop closure detection parameters
     LOOP_MIN_NODE_GAP = 5  # Minimum nodes between current and candidate
-    LOOP_MAX_DIST_CM = 100.0  # Max distance (cm) to consider loop closure
+    LOOP_MAX_DIST_CM = 70.0  # Max distance (cm) to consider loop closure
     LOOP_MIN_MATCH_RATIO = 0.5  # ICP match ratio required for loop closure
 
     # ICP edge sanity thresholds: reject if ICP disagrees with odometry
