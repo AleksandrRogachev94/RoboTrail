@@ -40,7 +40,8 @@ class GraphSlamSystem(SlamSystem):
     """
 
     # How often to run graph optimization (every N nodes added)
-    OPTIMIZE_EVERY_N = 1
+    # Also optimizes immediately when a loop closure is detected.
+    OPTIMIZE_EVERY_N = 5
 
     # Loop closure detection parameters
     LOOP_MIN_NODE_GAP = 5  # Minimum nodes between current and candidate
@@ -61,6 +62,8 @@ class GraphSlamSystem(SlamSystem):
         self._last_optimize_stats: dict | None = None
         self._grid_lock = threading.Lock()
         self._recent_loop_targets: set[int] = set()
+        self._loop_closure_pending: bool = False
+        self._failed_loop_regions: list[tuple[float, float]] = []  # (x, y) positions
 
         # Graph data for web UI
         self.graph_info = {
@@ -226,6 +229,7 @@ class GraphSlamSystem(SlamSystem):
                 n_loops = self._check_loop_closures(node_id, current_scan_world, pose)
                 if n_loops > 0:
                     self.graph_info["loop_closures"] += n_loops
+                    self._loop_closure_pending = True
                     print(f"Added {n_loops} loop closure edge(s)!")
 
             # ── Track state ────────────────────────────────────────
@@ -233,13 +237,14 @@ class GraphSlamSystem(SlamSystem):
             self._prev_scan_world = current_scan_world
             self._nodes_since_optimize += 1
 
-            # ── Periodic optimization ──────────────────────────────
+            # ── Optimization: on loop closure (immediate) or periodic ──
             t_opt = 0.0
             did_optimize = False
-            if (
-                self._nodes_since_optimize >= self.OPTIMIZE_EVERY_N
-                and self.pose_graph.num_edges > 0
-            ):
+            should_optimize = self.pose_graph.num_edges > 0 and (
+                self._loop_closure_pending
+                or self._nodes_since_optimize >= self.OPTIMIZE_EVERY_N
+            )
+            if should_optimize:
                 t1 = time.monotonic()
                 stats = self.pose_graph.optimize()
                 with self._grid_lock:
@@ -253,9 +258,17 @@ class GraphSlamSystem(SlamSystem):
                 self.pose = (corrected[0], corrected[1], norm_heading)
                 self.robot.set_pose(*self.pose)
 
+                # Recompute _prev_scan_world using the corrected pose
+                # so the next scan-to-scan ICP uses the right reference
+                self._prev_scan_world, _ = scan_to_world(
+                    self.pose_graph.get_node(node_id).scan_points,
+                    self.pose,
+                )
+
                 self._nodes_since_optimize = 0
                 self._num_optimizations += 1
                 self._last_optimize_stats = stats
+                self._loop_closure_pending = False
                 did_optimize = True
 
                 self.map_version += 1
@@ -560,13 +573,18 @@ class GraphSlamSystem(SlamSystem):
             if waypoints and len(waypoints) >= 2:
                 loop_node = self._find_loop_node_along_path(waypoints)
                 if loop_node is not None:
+                    nx, ny = loop_node.pose[0], loop_node.pose[1]
                     print(
                         f"🔄 On-the-way loop closure: detour to node "
-                        f"{loop_node.id} at ({loop_node.pose[0]:.0f}, "
-                        f"{loop_node.pose[1]:.0f})"
+                        f"{loop_node.id} at ({nx:.0f}, {ny:.0f})"
                     )
                     self._recent_loop_targets.add(loop_node.id)
-                    self._drive_one_step((loop_node.pose[0], loop_node.pose[1]))
+                    closures_before = self.graph_info["loop_closures"]
+                    self._drive_one_step((nx, ny))
+                    # If no loop closure was detected, mark this area as failed
+                    if self.graph_info["loop_closures"] == closures_before:
+                        self._failed_loop_regions.append((nx, ny))
+                        print(f"🔄 No closure at ({nx:.0f}, {ny:.0f}) — marking region")
                     self.explore_goal = None
                     return
 
@@ -601,6 +619,13 @@ class GraphSlamSystem(SlamSystem):
                 continue
             graph_gap = current_id - nid
             if graph_gap < self.LOOP_MIN_NODE_GAP:
+                continue
+            # Skip nodes near previously failed regions
+            in_failed_region = any(
+                math.hypot(node.pose[0] - fx, node.pose[1] - fy) < 60.0
+                for fx, fy in self._failed_loop_regions
+            )
+            if in_failed_region:
                 continue
             for wx, wy in waypoints[1:]:  # skip start (robot is there)
                 if math.hypot(node.pose[0] - wx, node.pose[1] - wy) < proximity_cm:

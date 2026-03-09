@@ -303,6 +303,10 @@ class PoseGraph:
 
         # Step 4: Unpack optimized poses back into nodes.
         # Track the largest correction for diagnostics.
+        # Cap corrections to prevent violent single-step jumps that create
+        # ghosting when the map is rebuilt. Large corrections will converge
+        # over multiple optimization calls.
+        MAX_CORRECTION_CM = 30.0
         max_correction = 0.0
         for nid in node_ids:
             idx = id_to_index[nid]
@@ -315,7 +319,20 @@ class PoseGraph:
             correction = math.hypot(new_x - old_pose[0], new_y - old_pose[1])
             max_correction = max(max_correction, correction)
 
-            # Update the node's pose with the optimized values
+            # Cap: if correction is too large, blend toward optimized pose
+            if correction > MAX_CORRECTION_CM and correction > 0:
+                blend = MAX_CORRECTION_CM / correction
+                new_x = old_pose[0] + blend * (new_x - old_pose[0])
+                new_y = old_pose[1] + blend * (new_y - old_pose[1])
+                # Blend angle too (in radians for proper interpolation)
+                old_th_rad = math.radians(old_pose[2])
+                angle_diff = (new_th_rad - old_th_rad + math.pi) % (
+                    2 * math.pi
+                ) - math.pi
+                new_th_rad = old_th_rad + blend * angle_diff
+                new_th_deg = math.degrees(new_th_rad)
+
+            # Update the node's pose with the (possibly capped) values
             # Normalize heading to [-180, 180] to prevent accumulation
             new_th_deg = (new_th_deg + 180) % 360 - 180
             self.nodes[nid].pose = (new_x, new_y, new_th_deg)
