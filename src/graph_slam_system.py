@@ -17,6 +17,7 @@ Usage:
 """
 
 import math
+import resource
 import threading
 import time
 import traceback
@@ -288,11 +289,12 @@ class GraphSlamSystem(SlamSystem):
             )
 
             t_total = time.monotonic() - t0
+            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
             print(
                 f"⏱ scan={t_scan:.2f}s icp={t_icp:.2f}s "
                 f"opt={t_opt:.2f}s total={t_total:.2f}s "
                 f"[nodes={self.pose_graph.num_nodes} edges={self.pose_graph.num_edges}"
-                f"{' OPTIMIZED' if did_optimize else ''}]"
+                f"{' OPTIMIZED' if did_optimize else ''} mem={mem_mb:.0f}MB]"
             )
 
         except Exception as e:

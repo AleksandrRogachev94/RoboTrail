@@ -68,12 +68,17 @@ class Scanner:
             )  # settle after each small step (~4.6° at 40 pts)
 
             # Start fresh ranging -> wait for data -> read -> stop
-            # This avoids waiting for a "stale" reading to complete
+            # Timeout prevents I2C lockups from hanging the entire system
             self.vl53.start_ranging()
+            t_wait = time.monotonic()
             while not self.vl53.data_ready:
                 time.sleep(0.001)
+                if time.monotonic() - t_wait > 0.5:
+                    print(f"⚠ ToF timeout at angle {angle:.1f}°")
+                    break
 
-            distances.append(self.vl53.distance)
+            dist = self.vl53.distance if self.vl53.data_ready else None
+            distances.append(dist)
             self.vl53.clear_interrupt()
             self.vl53.stop_ranging()
 
