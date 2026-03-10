@@ -194,8 +194,9 @@ class PoseGraph:
         """
         sigma_x = max(0.05 * distance_cm, 0.5)
         sigma_y = max(0.05 * distance_cm, 0.5)
-        # Convert to radians — base uncertainty of 1 degree
-        sigma_theta = max(0.03 * math.radians(abs(rotation_deg)), math.radians(1.0))
+        # Convert to radians — base uncertainty of 3 degrees
+        # (gyro integration drifts ~0.3-1°/s, turns accumulate more)
+        sigma_theta = max(0.03 * math.radians(abs(rotation_deg)), math.radians(3.0))
         return np.diag([1 / sigma_x**2, 1 / sigma_y**2, 1 / sigma_theta**2])
 
     @staticmethod
