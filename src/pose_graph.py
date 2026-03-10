@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse import lil_matrix
 
 from occupancy_grid import OccupancyGrid
 
@@ -292,16 +293,78 @@ class PoseGraph:
             x0[3 * idx + 1] = node.pose[1]
             x0[3 * idx + 2] = math.radians(node.pose[2])
 
-        # Step 2: Compute initial cost (for stats).
+        # Step 2: Pre-cache edge data as NumPy arrays for vectorized residual.
+        m = len(self.edges)
+        edge_from = np.array([id_to_index[e.from_id] for e in self.edges], dtype=int)
+        edge_to = np.array([id_to_index[e.to_id] for e in self.edges], dtype=int)
+        edge_transforms = np.array(
+            [
+                [e.transform[0], e.transform[1], math.radians(e.transform[2])]
+                for e in self.edges
+            ]
+        )  # (m, 3) — dx, dy, dtheta in radians
+        # Pre-compute sqrt of info matrices (diagonal only)
+        # Each info_matrix is 3x3 diagonal, so sqrt_info diagonal = sqrt(|diag|)
+        edge_sqrt_info = np.array(
+            [np.sqrt(np.abs(np.diag(e.info_matrix))) for e in self.edges]
+        )  # (m, 3)
+
+        # Anchor prior: node 0's current pose (fixed reference)
+        anchor_pose = np.array(
+            [
+                self.nodes[0].pose[0],
+                self.nodes[0].pose[1],
+                math.radians(self.nodes[0].pose[2]),
+            ]
+        )
+
+        # Store cached data for the residual function
+        self._opt_cache = {
+            "edge_from": edge_from,
+            "edge_to": edge_to,
+            "edge_transforms": edge_transforms,
+            "edge_sqrt_info": edge_sqrt_info,
+            "anchor_pose": anchor_pose,
+        }
+
+        # Step 3: Compute initial cost (for stats).
         initial_residual = self._residual(x0)
         initial_cost = float(np.sum(initial_residual**2))
 
-        # Step 3: Run scipy optimizer.
+        # Step 4: Build Jacobian sparsity structure.
+        # Each edge produces 3 residuals that depend on 6 variables
+        # (3 from node_i + 3 from node_j). The anchor produces 3 residuals
+        # depending on 3 variables (node 0).
+        n_residuals = 3 + 3 * m
+        n_vars = 3 * n
+        sparsity = lil_matrix((n_residuals, n_vars), dtype=int)
+        # Anchor residuals (rows 0-2) depend on node 0 vars (cols 0-2)
+        sparsity[0:3, 0:3] = 1
+        # Edge residuals
+        for k in range(m):
+            row_start = 3 + 3 * k
+            i_idx = edge_from[k]
+            j_idx = edge_to[k]
+            # Residuals for edge k depend on node i and node j
+            sparsity[row_start : row_start + 3, 3 * i_idx : 3 * i_idx + 3] = 1
+            sparsity[row_start : row_start + 3, 3 * j_idx : 3 * j_idx + 3] = 1
+
+        # Step 5: Run scipy optimizer.
         # loss='huber' automatically down-weights large residuals (outliers).
         # This means a single bad ICP edge won't corrupt the whole graph.
-        result = least_squares(self._residual, x0, loss="huber")
+        # max_nfev caps compute time to prevent runaway optimization on Pi.
+        result = least_squares(
+            self._residual,
+            x0,
+            loss="huber",
+            jac_sparsity=sparsity,
+            max_nfev=200,
+        )
 
-        # Step 4: Unpack optimized poses back into nodes.
+        # Clean up cached data
+        del self._opt_cache
+
+        # Step 6: Unpack optimized poses back into nodes.
         # Track the largest correction for diagnostics.
         # Cap corrections to prevent violent single-step jumps that create
         # ghosting when the map is rebuilt. Large corrections will converge
@@ -348,13 +411,15 @@ class PoseGraph:
         }
 
     def _residual(self, poses_flat: np.ndarray) -> np.ndarray:
-        """Compute residual vector for all edges.
+        """Compute residual vector for all edges (vectorized).
 
         For each edge, the residual is:
-            r = sqrt_info @ (predicted_transform - measured_transform)
+            r = sqrt_info * (predicted_transform - measured_transform)
 
         where predicted_transform is computed from the current node poses
         and measured_transform is what the edge recorded.
+
+        Uses pre-cached NumPy arrays from optimize() for speed.
 
         Args:
             poses_flat: 1D array [x0, y0, θ0, x1, y1, θ1, ...] in RADIANS.
@@ -362,100 +427,71 @@ class PoseGraph:
 
         Returns:
             1D array of all residuals stacked together.
+            - 3 values for the anchor prior on node 0
             - 3 values per edge (dx_err, dy_err, dθ_err, each weighted)
-            - Plus 3 values for the anchor prior on node 0
         """
-        residuals = []
+        cache = self._opt_cache
+        edge_from = cache["edge_from"]
+        edge_to = cache["edge_to"]
+        edge_transforms = cache["edge_transforms"]
+        edge_sqrt_info = cache["edge_sqrt_info"]
+        anchor_pose = cache["anchor_pose"]
 
-        # ── Anchor: pin node 0 to its initial position ─────────────
-        # Without this, the optimizer can slide the entire graph around
-        # (all edges are relative, so shifting everything preserves them).
-        # We add a strong "virtual edge" that says node 0 should stay put.
+        # Reshape poses to (n, 3) for easy indexing
+        poses = poses_flat.reshape(-1, 3)
+
+        # ── Anchor residual: pin node 0 ─────────────────────────
         ANCHOR_WEIGHT = 1000.0
-        x0, y0, th0 = poses_flat[0], poses_flat[1], poses_flat[2]
-        node0 = self.nodes[0]
-        anchor_x = node0.pose[0]
-        anchor_y = node0.pose[1]
-        anchor_th = math.radians(node0.pose[2])
-        residuals.extend(
+        anchor_err = poses[0] - anchor_pose
+        anchor_err[2] = self._normalize_angle(anchor_err[2])
+        anchor_residual = ANCHOR_WEIGHT * anchor_err  # (3,)
+
+        # ── Vectorized per-edge residuals ───────────────────────
+        # Extract from/to poses for all edges at once
+        pi = poses[edge_from]  # (m, 3) — [xi, yi, thi]
+        pj = poses[edge_to]  # (m, 3) — [xj, yj, thj]
+
+        # Global displacement
+        dx_global = pj[:, 0] - pi[:, 0]  # (m,)
+        dy_global = pj[:, 1] - pi[:, 1]  # (m,)
+
+        # Rotate into node i's local frame
+        cos_i = np.cos(pi[:, 2])  # (m,)
+        sin_i = np.sin(pi[:, 2])  # (m,)
+        dx_pred = cos_i * dx_global + sin_i * dy_global  # (m,)
+        dy_pred = -sin_i * dx_global + cos_i * dy_global  # (m,)
+        dth_pred = pj[:, 2] - pi[:, 2]  # (m,)
+
+        # Error = predicted - measured (transforms already in radians)
+        errors = np.column_stack(
             [
-                ANCHOR_WEIGHT * (x0 - anchor_x),
-                ANCHOR_WEIGHT * (y0 - anchor_y),
-                ANCHOR_WEIGHT * self._normalize_angle(th0 - anchor_th),
+                dx_pred - edge_transforms[:, 0],
+                dy_pred - edge_transforms[:, 1],
+                self._normalize_angle(dth_pred - edge_transforms[:, 2]),
             ]
-        )
+        )  # (m, 3)
 
-        # ── Per-edge residuals ─────────────────────────────────────
-        for edge in self.edges:
-            # Step 1: Extract poses from flat vector
-            i = edge.from_id
-            j = edge.to_id
-            xi, yi, thi = (
-                poses_flat[3 * i],
-                poses_flat[3 * i + 1],
-                poses_flat[3 * i + 2],
-            )
-            xj, yj, thj = (
-                poses_flat[3 * j],
-                poses_flat[3 * j + 1],
-                poses_flat[3 * j + 2],
-            )
+        # Weight by sqrt(info) — element-wise for diagonal info matrices
+        weighted_errors = edge_sqrt_info * errors  # (m, 3)
 
-            # Step 2: Predicted relative transform in node i's local frame
-            #
-            # The global displacement (xj-xi, yj-yi) needs to be rotated
-            # into node i's local frame. Think of it as: "standing at node i,
-            # facing direction θ_i, how far forward/left is node j?"
-            #
-            #   local_x =  cos(θ_i) * dx_global + sin(θ_i) * dy_global
-            #   local_y = -sin(θ_i) * dx_global + cos(θ_i) * dy_global
-            #
-            dx_global = xj - xi
-            dy_global = yj - yi
-            cos_i = math.cos(thi)
-            sin_i = math.sin(thi)
-            dx_pred = cos_i * dx_global + sin_i * dy_global
-            dy_pred = -sin_i * dx_global + cos_i * dy_global
-            dth_pred = thj - thi
-
-            # Step 3: Measured transform (edge stores degrees, convert to rad)
-            dx_meas, dy_meas, dth_meas_deg = edge.transform
-            dth_meas = math.radians(dth_meas_deg)
-
-            # Step 4: Error = predicted - measured
-            # Critical: normalize angle error to [-π, π] so the optimizer
-            # doesn't think 1° and 359° are 358° apart
-            error = np.array(
-                [
-                    dx_pred - dx_meas,
-                    dy_pred - dy_meas,
-                    self._normalize_angle(dth_pred - dth_meas),
-                ]
-            )
-
-            # Step 5: Weight by sqrt of information matrix
-            # For diagonal info matrices: sqrt(diag(a,b,c)) = diag(√a,√b,√c)
-            # This works because scipy minimizes Σ rᵢ², and we want to
-            # minimize Σ eᵢᵀ Ω eᵢ = Σ (√Ω eᵢ)ᵀ(√Ω eᵢ) = Σ ||√Ω eᵢ||²
-            sqrt_info = np.sqrt(np.abs(edge.info_matrix))
-            weighted_error = sqrt_info @ error
-
-            residuals.extend(weighted_error.tolist())
-
-        return np.array(residuals)
+        # Combine anchor + edge residuals
+        result = np.empty(3 + 3 * len(edge_from))
+        result[:3] = anchor_residual
+        result[3:] = weighted_errors.ravel()
+        return result
 
     @staticmethod
-    def _normalize_angle(angle_rad: float) -> float:
-        """Normalize angle to [-π, π].
+    def _normalize_angle(angle_rad):
+        """Normalize angle(s) to [-π, π]. Works with scalars and arrays.
 
         Critical for the residual function — without this, the optimizer
         can chase phantom rotations (e.g., thinking 1° and 359° are 358° apart).
 
         Args:
-            angle_rad: Angle in radians.
+            angle_rad: Angle in radians (scalar or numpy array).
 
         Returns:
-            Equivalent angle in [-π, π].
+            Equivalent angle(s) in [-π, π].
         """
         return (angle_rad + math.pi) % (2 * math.pi) - math.pi
 
@@ -500,7 +536,7 @@ class PoseGraph:
 
     # ── Map Rebuild ────────────────────────────────────────────────
 
-    def rebuild_map(self, grid: OccupancyGrid) -> None:
+    def rebuild_map(self, grid: OccupancyGrid) -> float:
         """Clear the occupancy grid and replay all scans at optimized poses.
 
         After optimization adjusts node poses, the map must be rebuilt
@@ -509,7 +545,12 @@ class PoseGraph:
 
         Args:
             grid: The OccupancyGrid to rebuild (will be cleared first).
+
+        Returns:
+            Time in seconds the rebuild took.
         """
+        t0 = time.monotonic()
+
         # Reset grid to all-unknown (log-odds = 0)
         grid.grid[:] = 0.0
 
@@ -517,6 +558,8 @@ class PoseGraph:
         for nid in sorted(self.nodes.keys()):
             node = self.nodes[nid]
             grid.update(node.scan_points, node.pose, free_rays=node.free_rays)
+
+        return time.monotonic() - t0
 
     # ── Utilities ──────────────────────────────────────────────────
 

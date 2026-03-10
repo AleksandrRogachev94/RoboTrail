@@ -50,8 +50,8 @@ class GraphSlamSystem(SlamSystem):
     LOOP_MIN_MATCH_RATIO = 0.5  # ICP match ratio required for loop closure
 
     # ICP edge sanity thresholds: reject if ICP disagrees with odometry
-    ICP_MAX_DIST_DIFF = 15.0  # cm — max displacement difference from odometry
-    ICP_MAX_ANGLE_DIFF = 15.0  # degrees — max heading difference from odometry
+    ICP_MAX_DIST_DIFF = 18.0  # cm — max displacement difference from odometry
+    ICP_MAX_ANGLE_DIFF = 20.0  # degrees — max heading difference from odometry
 
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
@@ -239,44 +239,54 @@ class GraphSlamSystem(SlamSystem):
 
             # ── Optimization: on loop closure (immediate) or periodic ──
             t_opt = 0.0
+            t_rebuild = 0.0
             did_optimize = False
             should_optimize = self.pose_graph.num_edges > 0 and (
                 self._loop_closure_pending
                 or self._nodes_since_optimize >= self.OPTIMIZE_EVERY_N
             )
             if should_optimize:
-                t1 = time.monotonic()
-                stats = self.pose_graph.optimize()
-                with self._grid_lock:
-                    self.pose_graph.rebuild_map(self.grid)
-                t_opt = time.monotonic() - t1
+                try:
+                    t1 = time.monotonic()
+                    stats = self.pose_graph.optimize()
+                    t_opt = time.monotonic() - t1
 
-                # Update our current pose to the latest optimized pose
-                corrected = self.pose_graph.get_corrected_pose(node_id)
-                # Normalize heading to [-180, 180]
-                norm_heading = (corrected[2] + 180) % 360 - 180
-                self.pose = (corrected[0], corrected[1], norm_heading)
-                self.robot.set_pose(*self.pose)
+                    with self._grid_lock:
+                        t_rebuild = self.pose_graph.rebuild_map(self.grid)
 
-                # Recompute _prev_scan_world using the corrected pose
-                # so the next scan-to-scan ICP uses the right reference
-                self._prev_scan_world, _ = scan_to_world(
-                    self.pose_graph.get_node(node_id).scan_points,
-                    self.pose,
-                )
+                    # Update our current pose to the latest optimized pose
+                    corrected = self.pose_graph.get_corrected_pose(node_id)
+                    # Normalize heading to [-180, 180]
+                    norm_heading = (corrected[2] + 180) % 360 - 180
+                    self.pose = (corrected[0], corrected[1], norm_heading)
+                    self.robot.set_pose(*self.pose)
 
-                self._nodes_since_optimize = 0
-                self._num_optimizations += 1
-                self._recently_closed_ids.clear()  # Poses changed; allow re-closure
-                self._last_optimize_stats = stats
-                self._loop_closure_pending = False
-                did_optimize = True
+                    # Recompute _prev_scan_world using the corrected pose
+                    # so the next scan-to-scan ICP uses the right reference
+                    self._prev_scan_world, _ = scan_to_world(
+                        self.pose_graph.get_node(node_id).scan_points,
+                        self.pose,
+                    )
 
-                self.map_version += 1
-                print(
-                    f"Graph optimized: cost {stats['initial_cost']:.1f} → {stats['final_cost']:.1f}, "
-                    f"max_correction={stats['max_correction']:.1f}cm ({t_opt:.2f}s)"
-                )
+                    self._nodes_since_optimize = 0
+                    self._num_optimizations += 1
+                    self._recently_closed_ids.clear()  # Poses changed; allow re-closure
+                    self._last_optimize_stats = stats
+                    self._loop_closure_pending = False
+                    did_optimize = True
+
+                    self.map_version += 1
+                    print(
+                        f"Graph optimized: cost {stats['initial_cost']:.1f} → {stats['final_cost']:.1f}, "
+                        f"max_correction={stats['max_correction']:.1f}cm "
+                        f"({t_opt:.2f}s opt + {t_rebuild:.2f}s rebuild)"
+                    )
+                except Exception as e:
+                    print(f"⚠ Optimization failed: {e}")
+                    traceback.print_exc()
+                    # Reset counter so we retry later
+                    self._nodes_since_optimize = 0
+                    self._loop_closure_pending = False
 
             # ── Update graph info for UI ───────────────────────────
             self.graph_info.update(
