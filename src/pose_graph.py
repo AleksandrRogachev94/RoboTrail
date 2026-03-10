@@ -192,11 +192,10 @@ class PoseGraph:
             - Info = diag(1/σ²_x, 1/σ²_y, 1/σ²_θ)
             - Clamp minimum sigma to prevent division by zero
         """
-        sigma_x = max(0.05 * distance_cm, 0.1)
-        sigma_y = max(0.05 * distance_cm, 0.1)
-        # Convert to radians — the residual function works in radians,
-        # so the info matrix theta component must match
-        sigma_theta = max(0.02 * math.radians(abs(rotation_deg)), 0.01)
+        sigma_x = max(0.05 * distance_cm, 0.5)
+        sigma_y = max(0.05 * distance_cm, 0.5)
+        # Convert to radians — base uncertainty of 1 degree
+        sigma_theta = max(0.03 * math.radians(abs(rotation_deg)), math.radians(1.0))
         return np.diag([1 / sigma_x**2, 1 / sigma_y**2, 1 / sigma_theta**2])
 
     @staticmethod
@@ -351,18 +350,17 @@ class PoseGraph:
 
         # Step 5: Run scipy optimizer.
         # loss='huber' automatically down-weights large residuals (outliers).
-        # This means a single bad ICP edge won't corrupt the whole graph.
+        # We increase f_scale to 10.0 so valid loop closures aren't discarded
+        # as extreme outliers (which causes the graph to refuse to bend).
         # max_nfev caps compute time to prevent runaway optimization on Pi.
         result = least_squares(
             self._residual,
             x0,
             loss="huber",
+            f_scale=10.0,
             jac_sparsity=sparsity,
             max_nfev=200,
         )
-
-        # Clean up cached data
-        del self._opt_cache
 
         # Step 6: Unpack optimized poses back into nodes.
         # Track the largest correction for diagnostics.
@@ -400,7 +398,11 @@ class PoseGraph:
             new_th_deg = (new_th_deg + 180) % 360 - 180
             self.nodes[nid].pose = (new_x, new_y, new_th_deg)
 
-        final_cost = float(result.cost)
+        final_residual = self._residual(result.x)
+        final_cost = float(np.sum(final_residual**2))
+
+        # Clean up cached data for vectorized residual
+        del self._opt_cache
 
         return {
             "num_nodes": n,
