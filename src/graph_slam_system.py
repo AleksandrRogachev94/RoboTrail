@@ -53,6 +53,11 @@ class GraphSlamSystem(SlamSystem):
     ICP_MAX_DIST_DIFF = 18.0  # cm — max displacement difference from odometry
     ICP_MAX_ANGLE_DIFF = 20.0  # degrees — max heading difference from odometry
 
+    # Mid-turn scanning: if a turn exceeds this angle, scan mid-turn to
+    # ensure ICP has enough overlap. With 180° FOV, a 90° turn leaves ~0%
+    # overlap between consecutive scans. Scanning mid-turn guarantees ≥120° overlap.
+    MAX_TURN_WITHOUT_SCAN = 60.0  # degrees
+
     def __init__(self, use_icp=True):
         super().__init__(use_icp=use_icp)
         self.pose_graph = PoseGraph()
@@ -516,6 +521,103 @@ class GraphSlamSystem(SlamSystem):
         dtheta = (pose_to[2] - pose_from[2] + 180) % 360 - 180
 
         return (dx_local, dy_local, dtheta)
+
+    # ── Override: Split Large Turns ───────────────────────────────────
+
+    def _drive_one_step(self, target: tuple):
+        """Plan path to target, drive to the first waypoint, and scan.
+
+        Overrides parent to split large turns: if the heading change to the
+        next waypoint exceeds MAX_TURN_WITHOUT_SCAN (60°), we turn first,
+        take a mid-turn scan (giving ICP overlap), then drive forward.
+        """
+        tx, ty = target
+        from path_planner import plan_path
+
+        start_xy = (self.pose[0], self.pose[1])
+        waypoints = plan_path(self.grid, start_xy, (tx, ty))
+
+        if waypoints is None or len(waypoints) < 2:
+            print(f"No path to ({tx:.0f}, {ty:.0f})")
+            return
+
+        self.planned_waypoints = [(round(x, 1), round(y, 1)) for x, y in waypoints]
+        next_x, next_y = waypoints[1]
+
+        try:
+            self.robot.imu.calibrate_gyro(samples=100)
+            self.state = "MOVING"
+            self.message = f"Moving to ({next_x:.0f}, {next_y:.0f})..."
+            self.robot.history = []
+
+            # Compute heading change needed
+            dx = next_x - self.pose[0]
+            dy = next_y - self.pose[1]
+            dist = math.hypot(dx, dy)
+            target_heading = math.degrees(math.atan2(dy, dx))
+            heading_error = (target_heading - self.pose[2] + 180) % 360 - 180
+
+            if abs(heading_error) > self.MAX_TURN_WITHOUT_SCAN and dist > 1.0:
+                # Large turn: split into turn → scan → forward
+                self.robot.turn(heading_error)
+                self.pose = self.robot.get_pose()
+                self.robot.set_pose(
+                    self.pose[0],
+                    self.pose[1],
+                    (self.pose[2] + 180) % 360 - 180,
+                )
+                self.pose = self.robot.get_pose()
+                # Mid-turn scan: gives ICP overlap after the rotation
+                self._scan_and_update()
+                # Now drive forward (heading is already set)
+                self.robot.forward(dist)
+            else:
+                # Small turn: move_to handles it atomically
+                self.robot.move_to(next_x, next_y)
+
+            self.pose = self.robot.get_pose()
+            self.robot.set_pose(
+                self.pose[0],
+                self.pose[1],
+                (self.pose[2] + 180) % 360 - 180,
+            )
+            self.pose = self.robot.get_pose()
+            self.path_history.append((self.pose[0], self.pose[1]))
+
+            if self.robot.history:
+                h = self.robot.history
+                step = max(1, len(h) // 100)
+                self.pid_summary = {
+                    "t": [round(s["t"], 3) for s in h[::step]],
+                    "left_pwm": [round(s["left_pwm"]) for s in h[::step]],
+                    "right_pwm": [round(s["right_pwm"]) for s in h[::step]],
+                    "heading_error": [round(s["heading_error"], 1) for s in h[::step]],
+                }
+        except Exception as e:
+            self.state = "ERROR"
+            self.message = f"Move failed: {e}"
+            traceback.print_exc()
+            return
+
+        # Scan after arriving at waypoint
+        odom_pos = (self.pose[0], self.pose[1])
+        self._scan_and_update()
+
+        corrected_pos = (self.pose[0], self.pose[1])
+        if self.icp_result and self.icp_result.get("status") == "converged":
+            if self.path_history:
+                self.path_history[-1] = corrected_pos
+            self.icp_corrections.append(
+                {
+                    "from": [round(odom_pos[0], 1), round(odom_pos[1], 1)],
+                    "to": [
+                        round(corrected_pos[0], 1),
+                        round(corrected_pos[1], 1),
+                    ],
+                }
+            )
+
+        self.planned_waypoints = []
 
     # ── On-the-Way Loop Closure ─────────────────────────────────────
 

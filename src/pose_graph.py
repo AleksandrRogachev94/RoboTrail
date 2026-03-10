@@ -350,16 +350,13 @@ class PoseGraph:
 
         # Step 5: Run scipy optimizer.
         # loss='huber' automatically down-weights large residuals (outliers).
-        # We increase f_scale to 10.0 so valid loop closures aren't discarded
-        # as extreme outliers (which causes the graph to refuse to bend).
         # max_nfev caps compute time to prevent runaway optimization on Pi.
         result = least_squares(
             self._residual,
             x0,
             loss="huber",
-            f_scale=10.0,
             jac_sparsity=sparsity,
-            max_nfev=2000,
+            max_nfev=500,
         )
 
         # Step 6: Unpack optimized poses back into nodes.
@@ -443,7 +440,7 @@ class PoseGraph:
         poses = poses_flat.reshape(-1, 3)
 
         # ── Anchor residual: pin node 0 ─────────────────────────
-        ANCHOR_WEIGHT = 1000.0
+        ANCHOR_WEIGHT = 100.0
         anchor_err = poses[0] - anchor_pose
         anchor_err[2] = self._normalize_angle(anchor_err[2])
         anchor_residual = ANCHOR_WEIGHT * anchor_err  # (3,)
