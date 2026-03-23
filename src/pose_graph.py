@@ -357,7 +357,7 @@ class PoseGraph:
             x0,
             loss="huber",
             jac_sparsity=sparsity,
-            max_nfev=500,
+            max_nfev=100,
         )
 
         # Step 6: Unpack optimized poses back into nodes.

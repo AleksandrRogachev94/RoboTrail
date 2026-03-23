@@ -147,13 +147,16 @@ def select_goal(
     traversable = grid.get_traversability_grid()
     start_rc = grid.world_to_grid(rx, ry)
 
-    # Ensure start is traversable (robot is physically here)
+    # Ensure start is traversable (robot is physically here).
+    # Only clear inflated cells — preserve raw occupied cells.
     sr, sc = start_rc
     rows, cols = traversable.shape
     CLEAR_R = 6
     r_lo, r_hi = max(0, sr - CLEAR_R), min(rows, sr + CLEAR_R + 1)
     c_lo, c_hi = max(0, sc - CLEAR_R), min(cols, sc + CLEAR_R + 1)
-    traversable[r_lo:r_hi, c_lo:c_hi] = True
+    prob_map = grid.get_probability_map()
+    raw_occ = prob_map[r_lo:r_hi, c_lo:c_hi] > 0.7
+    traversable[r_lo:r_hi, c_lo:c_hi] |= ~raw_occ
 
     min_dist_threshold = max(1.0, min_distance_cm)
 
