@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+Pillow
+flask
+evdev
+lgpio
+adafruit-blinka
+adafruit-circuitpython-vl53l1x
+adafruit-circuitpython-ssd1306
+pytest
