@@ -26,16 +26,16 @@ DC_PWM_FREQ = 1000
 # DC Motor Movement Constants
 # =============================================================================
 TICKS_PER_CM = 45  # Calibrate with real measurement
-MAX_FORWARD_VELOCITY = 700  # ticks/sec max wheel speed
+MAX_FORWARD_VELOCITY = 900  # ticks/sec max wheel speed
 DT = 0.02  # 50Hz control loop
 
 # Forward motion profile
-RAMP_DISTANCE_CM = 8.0  # Ramp up/down over this distance
+RAMP_DISTANCE_CM = 5.0  # Ramp up/down over this distance
 MIN_SPEED_FACTOR = 0.15  # Minimum speed during ramp (15% of target)
 
 # Turn profile
-RAMP_ANGLE_DEG = 20.0  # Ramp up/down over this angle
-MAX_TURN_VELOCITY = 500  # ticks/sec max wheel speed during turns
+RAMP_ANGLE_DEG = 12.0  # Ramp up/down over this angle
+MAX_TURN_VELOCITY = 650  # ticks/sec max wheel speed during turns
 MIN_TURN_FACTOR = 0.20  # Minimum speed during turn ramp (20%)
 TURN_PID_FINE_GAIN = 0.1  # 10% of normal heading PID for fine correction
 

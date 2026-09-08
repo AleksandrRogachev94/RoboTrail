@@ -208,6 +208,10 @@ class GraphSlamSystem(SlamSystem):
                             )
                             edge_added = True
                         elif not icp_sane:
+                            # ICP disagreed with odometry → this segment likely has
+                            # undetected drift (featureless hallway). Penalize the
+                            # odometry edge so loop closures can correct it later.
+                            self.pose_graph.edges[-1].info_matrix *= 0.3
                             print(
                                 f"ICP rejected (sanity): Δdist={dist_diff:.1f}cm "
                                 f"Δangle={angle_diff:.1f}° vs odometry"
@@ -471,8 +475,10 @@ class GraphSlamSystem(SlamSystem):
                 icp_quality["mean_error"],
                 True,
             )
-            # Boost: loop closures are high-value constraints
-            icp_info *= 2.0
+            # Boost: loop closures are high-value constraints.
+            # Needs to be strong enough to overpower chains of
+            # uncorrected odometry edges in featureless areas.
+            icp_info *= 5.0
 
             # Edge: from=candidate → to=current
             self.pose_graph.add_edge(

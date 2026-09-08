@@ -227,7 +227,9 @@ def plan_path(
     goal_rc = grid.world_to_grid(*goal_xy)
 
     # Step 2b: Ensure start is traversable (robot is physically here,
-    # but ICP correction may have placed it inside an inflation zone)
+    # but ICP correction may have placed it inside an inflation zone).
+    # Only clear inflated cells — preserve raw occupied cells to avoid
+    # routing the robot through actual walls/obstacles.
     sr, sc = start_rc
     rows, cols = traversable.shape
     CLEAR_RADIUS = 6  # cells (~12cm) — enough to bridge inflation gap
@@ -235,7 +237,9 @@ def plan_path(
     r_hi = min(rows, sr + CLEAR_RADIUS + 1)
     c_lo = max(0, sc - CLEAR_RADIUS)
     c_hi = min(cols, sc + CLEAR_RADIUS + 1)
-    traversable[r_lo:r_hi, c_lo:c_hi] = True
+    prob_map = grid.get_probability_map()
+    raw_occ = prob_map[r_lo:r_hi, c_lo:c_hi] > 0.7
+    traversable[r_lo:r_hi, c_lo:c_hi] |= ~raw_occ
 
     # Step 3: A* search
     raw_path = a_star(traversable, start_rc, goal_rc)
