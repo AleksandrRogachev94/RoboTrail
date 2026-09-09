@@ -25,18 +25,18 @@ DC_PWM_FREQ = 1000
 # =============================================================================
 # DC Motor Movement Constants
 # =============================================================================
-TICKS_PER_CM = 45  # Calibrate with real measurement
+TICKS_PER_CM = 49.6  # Calibrate with real measurement
 MAX_FORWARD_VELOCITY = 900  # ticks/sec max wheel speed
 DT = 0.02  # 50Hz control loop
 
 # Forward motion profile
 RAMP_DISTANCE_CM = 5.0  # Ramp up/down over this distance
-MIN_SPEED_FACTOR = 0.15  # Minimum speed during ramp (15% of target)
+MIN_SPEED_FACTOR = 0.25  # Minimum speed during ramp (25% of target)
 
 # Turn profile
 RAMP_ANGLE_DEG = 12.0  # Ramp up/down over this angle
 MAX_TURN_VELOCITY = 650  # ticks/sec max wheel speed during turns
-MIN_TURN_FACTOR = 0.20  # Minimum speed during turn ramp (20%)
+MIN_TURN_FACTOR = 0.35  # Minimum speed during turn ramp (35%)
 TURN_PID_FINE_GAIN = 0.1  # 10% of normal heading PID for fine correction
 
 # =============================================================================
@@ -49,8 +49,13 @@ PID_KD = 0.0
 
 # Feedforward: PWM = OFFSET + SLOPE * velocity
 # Calibrated via calibrate_feedforward.py
-FEEDFORWARD_OFFSET = 25.0  # Dead zone PWM %
-FEEDFORWARD_SLOPE = 0.0679  # Measured from 50%→90% PWM tests
+# OFFSET is the *intercept* of the PWM/velocity line, not the dead-zone PWM:
+# at the dead-zone PWM the motor is already turning, so using the raw dead zone
+# double-counts. 17.0 ≈ 25% dead zone − 0.065 × ~120 ticks/s at that PWM.
+# (Was 4.0, which no run of calibrate_feedforward.py can produce — its search
+# starts at 25% — and which left almost no torque at the end of every turn.)
+FEEDFORWARD_OFFSET = 17.8  # PWM % intercept
+FEEDFORWARD_SLOPE = 0.07  # Measured from 50%→90% PWM tests
 
 # Heading PID (robot level) - TODO: Tune for your robot
 HEADING_PID_KP = 30.0  # degrees error → velocity differential
@@ -61,7 +66,7 @@ HEADING_PID_KD = 0.0
 # Servo/ToF Calibration
 # =============================================================================
 # Offset to correct servo 0° to true forward (run calibrate_servo_angle.py)
-SERVO_ANGLE_OFFSET = 5.5  # degrees (calibrated via calibrate_servo_angle.py)
+SERVO_ANGLE_OFFSET = 5.9  # degrees (calibrated via calibrate_servo_angle.py)
 TOF_OFFSET_X = 6.7  # cm (forward from wheel axis)
 TOF_OFFSET_Y = 0.0  # cm (lateral center)
 

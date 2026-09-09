@@ -47,11 +47,27 @@ class GraphSlamSystem(SlamSystem):
     # Loop closure detection parameters
     LOOP_MIN_NODE_GAP = 5  # Minimum nodes between current and candidate
     LOOP_MAX_DIST_CM = 70.0  # Max distance (cm) to consider loop closure
-    LOOP_MIN_MATCH_RATIO = 0.5  # ICP match ratio required for loop closure
+    LOOP_MIN_MATCH_RATIO = 0.6  # ICP match ratio required for loop closure
 
     # ICP edge sanity thresholds: reject if ICP disagrees with odometry
-    ICP_MAX_DIST_DIFF = 18.0  # cm — max displacement difference from odometry
+    ICP_MAX_DIST_DIFF = 10.0  # cm — max displacement difference from odometry
     ICP_MAX_ANGLE_DIFF = 20.0  # degrees — max heading difference from odometry
+
+    # Loop closure sanity thresholds. Looser than the sequential ones because
+    # the whole point of a loop closure is to correct accumulated drift — but
+    # not unbounded. A degenerate ICP slide along a wall produces an excellent
+    # match_ratio/mean_error with a wildly wrong rotation, and a loop closure
+    # is a strong constraint between distant parts of the graph, so an
+    # unchecked bad one corrupts the entire map. Match quality alone is NOT a
+    # sufficient gate.
+    LOOP_MAX_DIST_DIFF = 12.0  # cm — max disagreement with the current estimate
+    LOOP_MAX_ANGLE_DIFF = 20.0  # degrees
+
+    # Two scans facing away from each other share almost no field of view
+    # (180° FOV), so a high ICP match ratio between them is a spurious
+    # alignment, not a real one. Reject loop closures across too wide a
+    # heading gap before even running ICP.
+    LOOP_MAX_HEADING_GAP = 90.0  # degrees
 
     # Mid-turn scanning: if a turn exceeds this angle, scan mid-turn to
     # ensure ICP has enough overlap. With 180° FOV, a 90° turn leaves ~0%
@@ -198,6 +214,18 @@ class GraphSlamSystem(SlamSystem):
                         )
                         # Only add edge if info matrix is non-zero AND sane
                         edge_added = False
+                        if not np.any(icp_info > 0):
+                            # Too few / too poor matches for a usable
+                            # constraint — normal after a large in-place turn,
+                            # where a 180° FOV leaves almost no overlap. Logged
+                            # because it used to pass silently, hiding the fact
+                            # that a step had no scan-matching constraint.
+                            print(
+                                f"ICP no edge: match="
+                                f"{icp_quality['match_ratio'] * 100:.0f}% "
+                                f"err={icp_quality['mean_error']:.1f}cm "
+                                f"converged={icp_quality['converged']}"
+                            )
                         if np.any(icp_info > 0) and icp_sane:
                             self.pose_graph.add_edge(
                                 self._prev_node_id,
@@ -208,13 +236,55 @@ class GraphSlamSystem(SlamSystem):
                             )
                             edge_added = True
                         elif not icp_sane:
-                            # ICP disagreed with odometry → this segment likely has
-                            # undetected drift (featureless hallway). Penalize the
-                            # odometry edge so loop closures can correct it later.
-                            self.pose_graph.edges[-1].info_matrix *= 0.3
+                            # ICP disagreed with odometry. Down-weighting the
+                            # odometry edge only makes sense when ICP is the
+                            # more believable of the two, so require it to be
+                            # *credible* before it may impeach the encoders:
+                            #
+                            #   - a strong, tight match, and
+                            #   - a disagreement that is merely out of
+                            #     tolerance rather than absurd.
+                            #
+                            # The dominant failure here is the aperture
+                            # problem: driving alongside a long flat wall, ICP
+                            # gets the rotation right and the translation
+                            # wildly wrong (observed: Δdist=44cm on a 47cm
+                            # move, Δangle=0.9°). That is ICP being unable to
+                            # measure the thing, not odometry drifting — and
+                            # penalising odometry there weakens our best
+                            # constraint exactly when it is the only good one.
+                            icp_credible = (
+                                icp_quality["match_ratio"] >= 0.7
+                                and icp_quality["mean_error"] < 4.0
+                                and dist_diff < 2.0 * self.ICP_MAX_DIST_DIFF
+                                and angle_diff < 2.0 * self.ICP_MAX_ANGLE_DIFF
+                            )
+                            if icp_credible:
+                                # Down-weight only the component that actually
+                                # disagreed. Scaling all three would degrade
+                                # the gyro heading on the strength of a purely
+                                # translational dispute — and heading is the
+                                # one thing this odometry measures well.
+                                edge = self.pose_graph.edges[-1]
+                                parts = []
+                                if dist_diff >= self.ICP_MAX_DIST_DIFF:
+                                    edge.info_matrix[0, 0] *= 0.3
+                                    edge.info_matrix[1, 1] *= 0.3
+                                    parts.append("xy")
+                                if angle_diff >= self.ICP_MAX_ANGLE_DIFF:
+                                    edge.info_matrix[2, 2] *= 0.3
+                                    parts.append("θ")
+                                penalized = (
+                                    f" (odometry {'+'.join(parts)} down-weighted)"
+                                )
+                            else:
+                                penalized = ""
                             print(
                                 f"ICP rejected (sanity): Δdist={dist_diff:.1f}cm "
-                                f"Δangle={angle_diff:.1f}° vs odometry"
+                                f"Δangle={angle_diff:.1f}° "
+                                f"match={icp_quality['match_ratio'] * 100:.0f}% "
+                                f"err={icp_quality['mean_error']:.1f}cm"
+                                f"{penalized}"
                             )
 
                         self.icp_result = {
@@ -288,6 +358,7 @@ class GraphSlamSystem(SlamSystem):
                     print(
                         f"Graph optimized: cost {stats['initial_cost']:.1f} → {stats['final_cost']:.1f}, "
                         f"max_correction={stats['max_correction']:.1f}cm "
+                        f"/{stats['max_heading_correction']:.1f}° "
                         f"({t_opt:.2f}s opt + {t_rebuild:.2f}s rebuild)"
                     )
                 except Exception as e:
@@ -424,6 +495,16 @@ class GraphSlamSystem(SlamSystem):
             candidate_node = self.pose_graph.get_node(candidate_id)
             candidate_pose = candidate_node.pose
 
+            heading_gap = abs(
+                (candidate_pose[2] - current_pose[2] + 180) % 360 - 180
+            )
+            if heading_gap > self.LOOP_MAX_HEADING_GAP:
+                print(
+                    f"  Loop candidate {candidate_id}: rejected "
+                    f"(heading gap {heading_gap:.0f}° — scans don't overlap)"
+                )
+                continue
+
             # Transform candidate's sensor-frame scan to world frame
             candidate_scan_world, _ = scan_to_world(
                 candidate_node.scan_points, candidate_pose
@@ -470,15 +551,41 @@ class GraphSlamSystem(SlamSystem):
                 R_icp, t_icp, candidate_pose, current_pose
             )
 
+            # ── Geometric sanity gate ──────────────────────────────
+            # Compare against what the graph currently believes the
+            # candidate→current transform is. Drift means they should differ
+            # somewhat — that is the point — but a closure that disagrees by
+            # more than the thresholds is a degenerate ICP match, not a
+            # discovery. Match quality cannot detect this: a slide along a
+            # single wall scores a ~50% match at ~2cm mean error while being
+            # tens of degrees wrong in rotation.
+            expected = self._compute_relative_transform(candidate_pose, current_pose)
+            lc_dist_diff = math.hypot(
+                icp_transform[0] - expected[0], icp_transform[1] - expected[1]
+            )
+            lc_angle_diff = abs((icp_transform[2] - expected[2] + 180) % 360 - 180)
+            if (
+                lc_dist_diff > self.LOOP_MAX_DIST_DIFF
+                or lc_angle_diff > self.LOOP_MAX_ANGLE_DIFF
+            ):
+                print(
+                    f"  Loop candidate {candidate_id}: rejected (sanity) "
+                    f"Δdist={lc_dist_diff:.1f}cm Δangle={lc_angle_diff:.1f}° "
+                    f"vs current estimate"
+                )
+                continue
+
             icp_info = PoseGraph.compute_icp_info_matrix(
                 icp_quality["match_ratio"],
                 icp_quality["mean_error"],
                 True,
             )
-            # Boost: loop closures are high-value constraints.
-            # Needs to be strong enough to overpower chains of
-            # uncorrected odometry edges in featureless areas.
-            icp_info *= 5.0
+            # Boost: loop closures are high-value constraints and need to be
+            # able to overpower chains of uncorrected odometry edges. Kept
+            # modest (2x, was 5x) because the boost applies to a *measurement*
+            # whose accuracy the boost does nothing to improve — an
+            # over-boosted bad closure is unrecoverable.
+            icp_info *= 2.0
 
             # Edge: from=candidate → to=current
             self.pose_graph.add_edge(
@@ -528,14 +635,12 @@ class GraphSlamSystem(SlamSystem):
 
         return (dx_local, dy_local, dtheta)
 
-    # ── Override: Split Large Turns ───────────────────────────────────
+    # ── Override: Drive One Step ──────────────────────────────────────
 
     def _drive_one_step(self, target: tuple):
         """Plan path to target, drive to the first waypoint, and scan.
 
-        Overrides parent to split large turns: if the heading change to the
-        next waypoint exceeds MAX_TURN_WITHOUT_SCAN (60°), we turn first,
-        take a mid-turn scan (giving ICP overlap), then drive forward.
+        Large turns are split around a mid-turn scan by _move_to_waypoint.
         """
         tx, ty = target
         from path_planner import plan_path
@@ -556,30 +661,7 @@ class GraphSlamSystem(SlamSystem):
             self.message = f"Moving to ({next_x:.0f}, {next_y:.0f})..."
             self.robot.history = []
 
-            # Compute heading change needed
-            dx = next_x - self.pose[0]
-            dy = next_y - self.pose[1]
-            dist = math.hypot(dx, dy)
-            target_heading = math.degrees(math.atan2(dy, dx))
-            heading_error = (target_heading - self.pose[2] + 180) % 360 - 180
-
-            if abs(heading_error) > self.MAX_TURN_WITHOUT_SCAN and dist > 1.0:
-                # Large turn: split into turn → scan → forward
-                self.robot.turn(heading_error)
-                self.pose = self.robot.get_pose()
-                self.robot.set_pose(
-                    self.pose[0],
-                    self.pose[1],
-                    (self.pose[2] + 180) % 360 - 180,
-                )
-                self.pose = self.robot.get_pose()
-                # Mid-turn scan: gives ICP overlap after the rotation
-                self._scan_and_update()
-                # Now drive forward (heading is already set)
-                self.robot.forward(dist)
-            else:
-                # Small turn: move_to handles it atomically
-                self.robot.move_to(next_x, next_y)
+            self._move_to_waypoint(next_x, next_y)
 
             self.pose = self.robot.get_pose()
             self.robot.set_pose(
@@ -624,6 +706,43 @@ class GraphSlamSystem(SlamSystem):
             )
 
         self.planned_waypoints = []
+
+    def _move_to_waypoint(self, next_x: float, next_y: float) -> None:
+        """Drive to a waypoint, splitting large turns around a mid-turn scan.
+
+        With a 180° FOV a 90° turn leaves almost no overlap between
+        consecutive scans, so scan-to-scan ICP has nothing to match against.
+        Turning first, scanning, then driving guarantees the overlap.
+
+        Overrides SlamSystem so both the navigate-to-target path and the
+        exploration path get this — previously only exploration did, and a
+        user-commanded move could take a 60°+ turn with no mid-turn scan.
+        """
+        dx = next_x - self.pose[0]
+        dy = next_y - self.pose[1]
+        dist = math.hypot(dx, dy)
+        target_heading = math.degrees(math.atan2(dy, dx))
+        heading_error = (target_heading - self.pose[2] + 180) % 360 - 180
+
+        if abs(heading_error) > self.MAX_TURN_WITHOUT_SCAN and dist > 1.0:
+            # Large turn: split into turn → scan → forward
+            self.robot.turn(heading_error)
+            self.pose = self.robot.get_pose()
+            self.robot.set_pose(
+                self.pose[0],
+                self.pose[1],
+                (self.pose[2] + 180) % 360 - 180,
+            )
+            self.pose = self.robot.get_pose()
+            # Mid-turn scan: gives ICP overlap after the rotation
+            self._scan_and_update()
+            # Re-aim from the post-scan pose: the mid-turn scan may have
+            # triggered an optimization that moved us, and the turn itself
+            # stops within a 1° deadband.
+            self.robot.move_to(next_x, next_y)
+        else:
+            # Small turn: move_to handles it atomically
+            self.robot.move_to(next_x, next_y)
 
     # ── On-the-Way Loop Closure ─────────────────────────────────────
 
@@ -721,7 +840,26 @@ class GraphSlamSystem(SlamSystem):
 
         targets.sort(reverse=True)
 
-        for score, nid, node in targets[:max_targets]:
+        # Deduplicate spatially. The startup spin leaves nodes 0/1/2 stacked at
+        # the origin, so the top-scoring targets are often the same place: the
+        # sweep drove to node 0 and then "arrived" at nodes 1 and 2 without
+        # moving or scanning, burning two of its three slots on no-ops.
+        # Keeping one target per MIN_TARGET_SEPARATION_CM spends them on
+        # genuinely different viewpoints instead.
+        MIN_TARGET_SEPARATION_CM = 40.0
+        spread_targets = []
+        for score, nid, node in targets:
+            if any(
+                math.hypot(node.pose[0] - c.pose[0], node.pose[1] - c.pose[1])
+                < MIN_TARGET_SEPARATION_CM
+                for _, _, c in spread_targets
+            ):
+                continue
+            spread_targets.append((score, nid, node))
+            if len(spread_targets) >= max_targets:
+                break
+
+        for score, nid, node in spread_targets:
             waypoints = plan_path(
                 self.grid,
                 (self.pose[0], self.pose[1]),

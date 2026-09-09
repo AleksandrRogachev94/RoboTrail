@@ -29,9 +29,27 @@ class IMU:
         # Gyro bias (found during calibration)
         self.gyro_bias = (0.0, 0.0, 0.0)
 
-        # Wake up the sensor
+        # Wake up the sensor (PWR_MGMT_1: clear sleep bit)
         self._write_register(0x6B, 0x00)
         time.sleep(0.1)
+
+        # Configure the digital low-pass filter. Out of reset DLPF_CFG=0 leaves
+        # the gyro at 256Hz bandwidth while we only sample at 50Hz, so chassis
+        # vibration aliases straight into the integrated heading — much worse on
+        # carpet than on hard floor. DLPF_CFG=3 gives 44Hz gyro bandwidth
+        # (4.9ms delay), comfortably above our turn rates (~100°/s) and below
+        # the sampling Nyquist limit.
+        self._write_register(0x1A, 0x03)  # CONFIG: DLPF_CFG = 3
+
+        # Sample rate divider: with DLPF enabled the base rate is 1kHz.
+        # 0 → 1kHz, so every read_gyro_z() returns a fresh, filtered sample.
+        self._write_register(0x19, 0x00)  # SMPLRT_DIV
+
+        # Gyro full-scale range. Set explicitly rather than relying on the
+        # reset default, because read_gyro_raw()'s 131 LSB/(°/s) scale factor
+        # is only correct for ±250°/s.
+        self._write_register(0x1B, 0x00)  # GYRO_CONFIG: FS_SEL = 0 (±250°/s)
+        time.sleep(0.05)
 
         if calibrate:
             self.calibrate_gyro()
