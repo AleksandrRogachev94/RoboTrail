@@ -62,16 +62,16 @@ def main():
     right_enc = Encoder(encoders[0][0])
 
     try:
-        # Find dead zone
+        # Find dead zone. Start low: on carpet the break-away PWM is higher
+        # than on hard floor, and starting at 25% cannot detect a lower one.
         print("Finding dead zone...")
-        for pwm in range(25, 60, 5):
+        dead_zone, dead_zone_vel = 40, 0.0
+        for pwm in range(10, 60, 5):
             vel = run_and_measure(left, right, left_enc, right_enc, pwm)
             print(f"  PWM={pwm}% -> {vel:.0f} ticks/sec")
             if vel > 100:
-                dead_zone = pwm
+                dead_zone, dead_zone_vel = pwm, vel
                 break
-        else:
-            dead_zone = 40
 
         # Measure at two points
         print("\nMeasuring velocity...")
@@ -83,12 +83,17 @@ def main():
         vel_90 = run_and_measure(left, right, left_enc, right_enc, 90)
         print(f"  90% -> {vel_90:.0f} ticks/sec")
 
-        # Calculate
+        # Calculate. The model is PWM = OFFSET + SLOPE * velocity, so OFFSET is
+        # the line's *intercept*, not the dead-zone PWM — at the dead-zone PWM
+        # the motor is already turning at dead_zone_vel, and reporting the raw
+        # dead zone as the offset double-counts that.
         slope = (90 - 50) / (vel_90 - vel_50) if vel_90 > vel_50 else 0.04
+        offset = max(0.0, dead_zone - slope * dead_zone_vel)
 
         print(f"\n{'=' * 40}")
-        print(f"FEEDFORWARD_OFFSET = {dead_zone}")
+        print(f"FEEDFORWARD_OFFSET = {offset:.1f}")
         print(f"FEEDFORWARD_SLOPE = {slope:.4f}")
+        print(f"  (dead zone {dead_zone}% at {dead_zone_vel:.0f} ticks/sec)")
         print(f"{'=' * 40}")
 
     finally:

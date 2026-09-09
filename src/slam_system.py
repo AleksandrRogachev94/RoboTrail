@@ -195,7 +195,7 @@ class SlamSystem:
                 self.state = "MOVING"
                 self.message = f"Moving to ({next_x:.0f}, {next_y:.0f})..."
                 self.robot.history = []
-                self.robot.move_to(next_x, next_y)
+                self._move_to_waypoint(next_x, next_y)
                 self.pose = self.robot.get_pose()
                 # Normalize heading to [-180, 180] to prevent accumulation
                 self.robot.set_pose(
@@ -247,6 +247,15 @@ class SlamSystem:
         if not self._exploring:
             self.state = "IDLE"
             self.message = "Ready"
+
+    def _move_to_waypoint(self, next_x: float, next_y: float) -> None:
+        """Drive to a single waypoint.
+
+        Seam for subclasses: GraphSlamSystem overrides this to split large
+        turns and take a mid-turn scan, so both the navigate-to-target path
+        and the exploration path get the same ICP overlap guarantees.
+        """
+        self.robot.move_to(next_x, next_y)
 
     def _scan_and_update(self, force_update=False):
         """Scan, optionally ICP correct, update grid.

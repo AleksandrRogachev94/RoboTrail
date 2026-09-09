@@ -4,8 +4,11 @@ Maintains a graph of robot poses (nodes) connected by constraints (edges).
 Edges come from odometry, scan-to-scan ICP, and loop closures. The optimizer
 finds the set of poses that best satisfies all constraints simultaneously.
 
-Uses scipy.optimize.least_squares with Huber loss for robust optimization
-(automatically down-weights outlier edges from bad ICP matches).
+Uses scipy.optimize.least_squares with a soft_l1 robust loss, which
+down-weights outlier edges from bad ICP matches. NOTE: do not switch this to
+loss="huber" or "cauchy" — combined with jac_sparsity (which forces scipy onto
+tr_solver="lsmr") those losses make the solver stall without converging, moving
+poses by fractions of a millimetre while reporting a large residual cost.
 
 Usage:
     graph = PoseGraph()
@@ -194,9 +197,11 @@ class PoseGraph:
         """
         sigma_x = max(0.05 * distance_cm, 0.5)
         sigma_y = max(0.05 * distance_cm, 0.5)
-        # Convert to radians — base uncertainty of 3 degrees
-        # (gyro integration drifts ~0.3-1°/s, turns accumulate more)
-        sigma_theta = max(0.03 * math.radians(abs(rotation_deg)), math.radians(3.0))
+        # Heading uncertainty scales with how far we rotated: the gyro is very
+        # good over a straight segment and degrades over big turns. The old
+        # 3° floor swamped the scaling term for every turn under ~100°, which
+        # made a pure translation look as uncertain in heading as a 90° turn.
+        sigma_theta = math.radians(max(0.04 * abs(rotation_deg), 0.8))
         return np.diag([1 / sigma_x**2, 1 / sigma_y**2, 1 / sigma_theta**2])
 
     @staticmethod
@@ -231,15 +236,15 @@ class PoseGraph:
         if not converged or match_ratio < 0.3:
             return np.zeros((3, 3))
 
-        # Base translation sigma from mean error (cm)
-        # Good match (2cm error, 90% ratio) → σ ≈ 0.44cm → info ≈ 5.1
-        # Okay match (5cm error, 50% ratio) → σ ≈ 2.0cm  → info ≈ 0.25
-        sigma_trans = max(mean_error / (match_ratio * 5.0), 0.1)
-
-        # Angular uncertainty: harder to estimate from ICP metrics.
-        # Scale similarly but with a floor — ICP angular accuracy is
-        # roughly proportional to translational accuracy for our scan geometry.
-        sigma_theta_deg = max(mean_error / (match_ratio * 2.0), 0.5)
+        # Base translation sigma from mean error (cm).
+        # The floor matters more than the formula: ICP residual measures how
+        # tightly the *matched subset* aligns, not whether the alignment is
+        # correct. A degenerate slide along a single wall yields a beautiful
+        # sub-cm residual, so we refuse to claim better than 1cm / 2° from an
+        # 80-point sparse scan. Without these floors a single bad ICP edge
+        # outweighed gyro odometry by 20-30x in heading.
+        sigma_trans = max(mean_error / (match_ratio * 5.0), 1.0)
+        sigma_theta_deg = max(mean_error / (match_ratio * 2.0), 2.0)
         sigma_theta_rad = math.radians(sigma_theta_deg)
 
         return np.diag(
@@ -268,6 +273,8 @@ class PoseGraph:
                 - "initial_cost": float
                 - "final_cost": float
                 - "max_correction": float (largest pose change in cm)
+                - "max_heading_correction": float (largest heading change the
+                  solver asked for, in degrees, before the per-optimize cap)
         """
         if len(self.nodes) < 2 or len(self.edges) == 0:
             return {
@@ -276,6 +283,7 @@ class PoseGraph:
                 "initial_cost": 0,
                 "final_cost": 0,
                 "max_correction": 0,
+                "max_heading_correction": 0,
             }
 
         # Step 1: Pack all node poses into a flat vector.
@@ -350,14 +358,18 @@ class PoseGraph:
             sparsity[row_start : row_start + 3, 3 * j_idx : 3 * j_idx + 3] = 1
 
         # Step 5: Run scipy optimizer.
-        # loss='huber' automatically down-weights large residuals (outliers).
+        # loss='soft_l1' down-weights large residuals (outliers) while staying
+        # compatible with jac_sparsity. Passing jac_sparsity forces scipy to
+        # use tr_solver='lsmr'; with loss='huber' or 'cauchy' that combination
+        # stalls (verified: a 36cm loop-closure error converged to 0.14cm of
+        # correction after burning all 100 evaluations). Keep them in sync.
         # max_nfev caps compute time to prevent runaway optimization on Pi.
         result = least_squares(
             self._residual,
             x0,
-            loss="huber",
+            loss="soft_l1",
             jac_sparsity=sparsity,
-            max_nfev=100,
+            max_nfev=200,
         )
 
         # Step 6: Unpack optimized poses back into nodes.
@@ -366,7 +378,9 @@ class PoseGraph:
         # ghosting when the map is rebuilt. Large corrections will converge
         # over multiple optimization calls.
         MAX_CORRECTION_CM = 30.0
+        MAX_HEADING_CORRECTION_DEG = 15.0
         max_correction = 0.0
+        max_heading_correction = 0.0
         for nid in node_ids:
             idx = id_to_index[nid]
             new_x = result.x[3 * idx]
@@ -377,6 +391,12 @@ class PoseGraph:
             old_pose = self.nodes[nid].pose
             correction = math.hypot(new_x - old_pose[0], new_y - old_pose[1])
             max_correction = max(max_correction, correction)
+            heading_correction = math.degrees(
+                self._normalize_angle(new_th_rad - math.radians(old_pose[2]))
+            )
+            max_heading_correction = max(
+                max_heading_correction, abs(heading_correction)
+            )
 
             # Cap: if correction is too large, blend toward optimized pose
             if correction > MAX_CORRECTION_CM and correction > 0:
@@ -391,12 +411,37 @@ class PoseGraph:
                 new_th_rad = old_th_rad + blend * angle_diff
                 new_th_deg = math.degrees(new_th_rad)
 
+            # Cap heading separately. A single optimize() must never be able
+            # to spin a node by tens of degrees: that pose is written straight
+            # back into the robot's dead-reckoning state, so a bad constraint
+            # would rotate every subsequent scan. Large-but-correct rotations
+            # still converge over successive optimizations.
+            heading_correction = math.degrees(
+                self._normalize_angle(new_th_rad - math.radians(old_pose[2]))
+            )
+            if abs(heading_correction) > MAX_HEADING_CORRECTION_DEG:
+                clamped = math.copysign(
+                    MAX_HEADING_CORRECTION_DEG, heading_correction
+                )
+                new_th_deg = old_pose[2] + clamped
+
             # Update the node's pose with the (possibly capped) values
             # Normalize heading to [-180, 180] to prevent accumulation
             new_th_deg = (new_th_deg + 180) % 360 - 180
             self.nodes[nid].pose = (new_x, new_y, new_th_deg)
 
-        final_residual = self._residual(result.x)
+        # Measure the final cost from the poses we actually stored, not from
+        # the raw solver output: when the correction caps engage, result.x is
+        # not what the graph now holds, and reporting its cost would overstate
+        # the improvement.
+        x_applied = np.empty_like(x0)
+        for nid in node_ids:
+            idx = id_to_index[nid]
+            p = self.nodes[nid].pose
+            x_applied[3 * idx] = p[0]
+            x_applied[3 * idx + 1] = p[1]
+            x_applied[3 * idx + 2] = math.radians(p[2])
+        final_residual = self._residual(x_applied)
         final_cost = float(np.sum(final_residual**2))
 
         # Clean up cached data for vectorized residual
@@ -408,6 +453,7 @@ class PoseGraph:
             "initial_cost": round(initial_cost, 2),
             "final_cost": round(final_cost, 2),
             "max_correction": round(max_correction, 2),
+            "max_heading_correction": round(max_heading_correction, 2),
         }
 
     def _residual(self, poses_flat: np.ndarray) -> np.ndarray:
