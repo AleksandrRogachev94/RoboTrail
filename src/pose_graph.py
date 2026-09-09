@@ -232,8 +232,17 @@ class PoseGraph:
             - Consider minimum match_ratio threshold below which
               you don't add the edge at all (return zeros)
         """
-        # Reject: unconverged or too few matches to be meaningful
-        if not converged or match_ratio < 0.3:
+        # Reject only when there is genuinely nothing to use.
+        # NOTE: `converged` is NOT a validity signal. icp() sets it True only
+        # if an iteration step shrank below 1e-3 rad / 0.05cm, which in
+        # aperture-ambiguous geometry (driving along a long flat wall) never
+        # happens — ICP keeps sliding a fraction of a cm every iteration and
+        # runs out its 50 iterations. Treating that as "invalid" discarded
+        # perfectly usable matches: one run threw away 7 edges at 53-90%
+        # match, two of them on a 166cm stretch that was then left with no
+        # scan-matching constraint at all. Down-weight instead of discard;
+        # the odometry sanity check still bounds how wrong an edge can be.
+        if match_ratio < 0.3:
             return np.zeros((3, 3))
 
         # Base translation sigma from mean error (cm).
@@ -245,6 +254,13 @@ class PoseGraph:
         # outweighed gyro odometry by 20-30x in heading.
         sigma_trans = max(mean_error / (match_ratio * 5.0), 1.0)
         sigma_theta_deg = max(mean_error / (match_ratio * 2.0), 2.0)
+
+        # Not reaching a fixed point still means less confidence, just not
+        # zero confidence.
+        if not converged:
+            sigma_trans *= 1.5
+            sigma_theta_deg *= 1.5
+
         sigma_theta_rad = math.radians(sigma_theta_deg)
 
         return np.diag(
