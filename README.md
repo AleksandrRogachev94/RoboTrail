@@ -16,6 +16,8 @@ It's also a learning project. Every stage was built to understand *why* SLAM wor
 
 ## Hardware
 
+<img src="robotrail.jpg" alt="RoboTrail hardware, top plate exposed" width="500">
+
 | Part | What | Why |
 | --- | --- | --- |
 | Raspberry Pi 5 | Brains | Runs everything, streams the camera over the web UI |
