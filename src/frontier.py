@@ -15,9 +15,18 @@ from robot.config import GRID_RESOLUTION, OBSTACLE_PADDING_CM, ROBOT_RADIUS_CM
 
 # ── Constants ──────────────────────────────────────────────────────────
 
-MIN_CLUSTER_SIZE = 40  # Filter small gaps; real frontiers are larger
+# Filter noise, but stay small enough to notice real gaps. At 2cm resolution
+# 40 cells was ~80cm of frontier boundary, so a doorway-sized gap was invisible
+# and the run declared itself complete with room left to map. 20 was too far
+# the other way — it chased every 40cm nook along a ragged map edge.
+MIN_CLUSTER_SIZE = 30
 
-# Obstacle inflation: reduced vs path planning to detect frontiers in narrow passages
+# Obstacle inflation: reduced vs path planning to detect frontiers in narrow
+# passages. Do NOT reduce this further to chase narrow gaps: at -4 (6cm
+# clearance, less than the 7.75cm robot radius) frontiers appear right against
+# walls, and a short hop to one is planned entirely inside plan_path's
+# start-clearing bubble where inflation is disabled — the robot drove into an
+# obstacle.
 _OBSTACLE_INFLATION = math.ceil(
     (ROBOT_RADIUS_CM + OBSTACLE_PADDING_CM) / GRID_RESOLUTION
 )
@@ -136,6 +145,10 @@ def select_goal(
     Args:
         min_distance_cm: Skip points closer than this (avoids picking
                          frontiers the robot is already sitting on).
+                         Keep this comfortably above plan_path's
+                         CLEAR_RADIUS (~12cm), inside which obstacle
+                         inflation is disabled — a goal within that bubble
+                         gets a path with no safety padding at all.
 
     Returns:
         (goal_x, goal_y) in world cm, or None if nothing reachable.
