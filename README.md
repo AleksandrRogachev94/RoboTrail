@@ -5,7 +5,7 @@ A 3D-printed Raspberry Pi robot that maps rooms on its own — no pre-built SLAM
 <!-- <video src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" controls autoplay loop muted></video> -->
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" alt="RoboTrail demo — The robot exploring a room" width="720">
+  <img src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" alt="RoboTrail demo — The robot exploring a room" width="100%">
 </p>
 
 _The robot exploring a room: driving, stopping to scan with the ToF sensor, building the occupancy grid, and streaming its camera feed the whole time._
