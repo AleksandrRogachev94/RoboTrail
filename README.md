@@ -1,60 +1,87 @@
 # RoboTrail 🤖
 
-A 3D-printed Raspberry Pi robot that maps rooms on its own — no pre-built SLAM library, just a ToF sensor on a servo, some encoders, an IMU, and a lot of linear algebra.
-
-<!-- <video src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" controls autoplay loop muted></video> -->
+A 3D-printed Raspberry Pi robot that maps a room by itself — pose-graph SLAM, frontier exploration, and a single laser rangefinder on a servo, written from scratch in numpy and scipy. No ROS, no gmapping, no Cartographer.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" alt="RoboTrail demo — The robot exploring a room" width="100%">
 </p>
 
-_The robot exploring a room: driving, stopping to scan with the ToF sensor, building the occupancy grid, and streaming its camera feed the whole time._
+_Autonomous run: the robot picks a frontier, drives to it, stops, sweeps the room, folds the scan into the pose graph, and repeats — camera streaming the whole time._
 
-## What this is
+## What it actually does
 
-Most cheap SLAM demos lean entirely on a camera. That falls apart on plain walls or when the wheels slip a little. RoboTrail instead fuses several cheap sensors — wheel encoders, a gyro, and a time-of-flight distance sensor on a pan servo — so it can localize and map a room even when the visuals give it nothing to work with.
+There's no lidar here. The "lidar" is one VL53L1X time-of-flight sensor on a servo, taking 80 readings across a 180° arc every time the robot stops. That's a sparse, noisy, half-blind view of the room, which makes everything downstream harder — and is most of what makes the project interesting.
 
-It's also a learning project. Every stage was built to understand _why_ SLAM works, not just to get a demo running — dead reckoning first, then scan matching, then a proper probabilistic backend. The full stage-by-stage build log (hardware, wiring, and the SLAM concepts in the order they were learned) is in [LEARNING_PATH.md](LEARNING_PATH.md); the guides linked below go deep on individual pieces.
+The loop is stop-and-scan: drive one waypoint, stop, sweep, match the scan against the previous one, record it as a node in a pose graph, optimize the graph, rebuild the map from the corrected poses, pick the next frontier.
 
-> **AI assistants:** see [AI_GUIDE.md](AI_GUIDE.md) — the point of this repo is to learn robotics, so teach concepts rather than just writing the implementation.
+Localization is **pose-graph based, not filter based**. There's no EKF or particle filter in the running system — corrections come from ICP scan matching and joint graph optimization instead. ([EKF_GUIDE.md](EKF_GUIDE.md) is background reading from the learning path, not a description of what's running.)
+
+> **AI assistants:** see [AI_GUIDE.md](AI_GUIDE.md) — the point of this repo is learning robotics, so teach concepts rather than writing the implementation.
 
 ## Hardware
 
-<img src="robotrail.jpg" alt="RoboTrail hardware, top plate exposed" width="500">
+<p align="center">
+  <img src="robotrail.jpg" alt="RoboTrail — Pi 5, camera, buck converter and ToF laser on the top plate" width="560">
+</p>
 
-| Part                      | What                    | Why                                                        |
-| ------------------------- | ----------------------- | ---------------------------------------------------------- |
-| Raspberry Pi 5            | Brains                  | Runs everything, streams the camera over the web UI        |
-| SMARS chassis             | 3D-printed, tank treads | Cheap, easy to modify                                      |
-| N20 motors + TB6612FNG    | Drive with encoders     | Closed-loop odometry instead of guessing                   |
-| VL53L1X                   | Time-of-flight sensor   | The "lidar" — 4m range                                     |
-| SG90 servo                | Pans the ToF sensor     | Turns one point sensor into a 180° scan                    |
-| MPU-6050                  | Gyro                    | Tracks heading, corrects drift between scans               |
-| Pi Camera v3              | Camera                  | Live video feed while it drives                            |
-| 2S LiPo + XL4015 + INA219 | Power                   | 7.4V pack, buck-converted, with voltage/current monitoring |
+| Part | Notes |
+| --- | --- |
+| Raspberry Pi 5 | Runs everything on-board — SLAM, motor control, and the web server |
+| Custom 3D-printed chassis | Two-tier round platform, ~155 mm across, SMARS-style tank treads |
+| N20 motors + TB6612FNG | 1 kHz software PWM; quadrature encoders counted by the kernel `rotary-encoder` overlay and read over `evdev`, since Python polling drops ticks |
+| VL53L1X ToF | Short-range mode, 50 ms timing budget. Readings past 250 cm are treated as "nothing there" rather than as hits |
+| SG90 servo | Hardware PWM on GPIO 18 — software PWM jitters under load and smears the scan |
+| MPU-6050 | Gyro Z only, integrated at 50 Hz for heading; bias re-calibrated before every move |
+| Pi Camera v3 | MJPEG stream to the dashboard, on a [printed mount](cad/pi_camera_v3_mount.scad) |
+| KY-008 laser | Debug aid — shows where the ToF is actually pointing |
+| 2S LiPo + XL4015 | 7.4 V pack, bucked down to 5 V |
 
-Full wiring, I2C addresses, and the chassis dimensions are in [CHASSIS.md](CHASSIS.md).
+Chassis dimensions, wiring, and I2C addresses are in [CHASSIS.md](CHASSIS.md).
 
-## How it maps a room
+## How it works
 
-The core loop is "stop and scan": drive a bit, stop, sweep the servo for a fresh set of range readings, fold that into the map, decide where to explore next, repeat.
+**Motion.** Turn in place to face the waypoint, then drive straight. Each wheel runs a velocity PID over a feedforward term (`PWM = 17.8 + 0.07·v`), with a heading PID on top trimming the difference, all at 50 Hz on trapezoidal ramps. Pose is dead-reckoned from encoder ticks using RK2 integration against the midpoint heading.
 
-- **Odometry** — encoder ticks + gyro heading give a rough estimate of where the robot is after each move.
-- **Scan matching (ICP)** — each new sweep gets matched against the existing map to correct the drift that odometry alone can't catch. See [ICM_SCAN_MATCHING.md](ICM_SCAN_MATCHING.md).
-- **Pose graph / Graph SLAM** — instead of committing every correction immediately, poses and constraints are kept in a graph and optimized together, so a bad scan match doesn't permanently wreck the map. See [GRAPH_SLAM_GUIDE.md](GRAPH_SLAM_GUIDE.md).
-- **EKF** — position is tracked as a distribution, not a single point, so the robot has a real sense of how confident it is. See [EKF_GUIDE.md](EKF_GUIDE.md).
-- **Occupancy grid + frontier exploration + A\*** — the map is a plain 2D grid; the robot picks the nearest unexplored boundary and A\* plans a path to it, avoiding walls.
+**Mapping.** A log-odds occupancy grid at 2 cm resolution. Each scan point casts a Bresenham ray: cells along the ray lose 0.4, the cell at the hit gains 0.85, and values clamp at ±5 so the map can still be argued out of a mistake.
+
+**Scan matching.** [`icp.py`](src/icp.py) is a hybrid point-to-line ICP. Surface normals are estimated from each map point's 6 nearest neighbours, and where they're reliable the solver constrains the scan point to lie _on_ the wall rather than on top of one specific map dot — which matters enormously when a scan is only 80 points. Where normals are unreliable it falls back to classic point-to-point SVD. Correspondences past a distance threshold get dropped, and a match ratio below 25% aborts the alignment entirely. Derivations in [ICM_SCAN_MATCHING.md](ICM_SCAN_MATCHING.md).
+
+**Pose graph.** ([`pose_graph.py`](src/pose_graph.py), [GRAPH_SLAM_GUIDE.md](GRAPH_SLAM_GUIDE.md).) Every scan becomes a node, stored in _sensor_ frame so it can be replayed later at a corrected pose. Edges come from odometry, sequential ICP, and loop closures, each weighted by an information matrix derived from match ratio and residual error. `scipy.optimize.least_squares` with a `soft_l1` loss and a sparse Jacobian solves all poses jointly, anchored on node 0; the map is then discarded and rebuilt from the corrected trajectory. That runs every 5 nodes, or immediately when a loop closes.
+
+Most of the work is in the guards around that pipeline:
+
+- An ICP result that disagrees with odometry by more than 10 cm or 20° is rejected outright. Driving alongside a long blank wall, ICP hits the aperture problem — great-looking match, rotation correct, translation off by half the wall — so match quality alone can't be trusted.
+- Loop closures need a 5-node gap, a candidate within 70 cm, a heading gap under 90° (with a 180° field of view, two scans facing away from each other share no visible geometry, so a confident match between them is a lie), and an ICP match ratio of 0.6+.
+- Turns over 60° trigger a mid-turn scan, because a 90° turn otherwise leaves consecutive scans with almost no overlap for ICP to work with.
+
+**Exploration.** Frontier cells — traversable cells touching unknown space — are clustered by BFS flood fill, with clusters under 30 cells dismissed as noise. Obstacles are inflated by the robot radius (7.75 cm) plus 5 cm of padding, then A\* on the 8-connected grid plans a route, simplified afterwards by line-of-sight checks. The robot drives exactly **one** waypoint per iteration and re-detects frontiers after every scan, so it never keeps chasing a frontier the last scan already resolved. When no reachable frontiers remain, the run is done.
+
+## Web dashboard
+
+[`web_server.py`](src/web_server.py) serves a single page: live camera feed, the occupancy grid on a canvas, and toggleable overlays for traversable space, driven trajectory, planned path, frontier clusters, pose graph nodes and edges, loop closures, and ICP corrections drawn as arrows from raw odometry to the corrected pose. Plus a pose/state HUD, live graph stats, and a PID trace from the last movement. Click the map to send the robot somewhere, or hit Explore and leave it alone.
 
 ## Running it
 
 ```bash
 pip install -r requirements.txt
 
-# on the Pi, needs GPIO/camera access:
+# on the Pi — needs root for GPIO and port 80
 sudo python3 src/web_server.py
 ```
 
-Then open `http://<pi-ip>` in a browser for the live camera feed and map. Most of the individual modules (`occupancy_grid.py`, `path_planner.py`, `icp.py`, etc.) also run standalone for testing — see the `*_test.py` files next to each one.
+Then open `http://<pi-ip>` in a browser.
+
+Most modules run standalone off-robot — see the `*_test.py` file next to each one ([`icp_test.py`](src/icp_test.py), [`pose_graph_test.py`](src/pose_graph_test.py), [`path_planner_test.py`](src/path_planner_test.py), [`frontier_test.py`](src/frontier_test.py)); they render plots rather than assert. Calibration lives in the `calibrate_*.py` scripts — ticks per cm, motor feedforward, servo zero, and ToF alignment all need redoing for a different build.
+
+## Docs
+
+|  |  |
+| --- | --- |
+| [LEARNING_PATH.md](LEARNING_PATH.md) | The full stage-by-stage build log, dead reckoning through visual SLAM |
+| [ICM_SCAN_MATCHING.md](ICM_SCAN_MATCHING.md) | ICP from first principles |
+| [GRAPH_SLAM_GUIDE.md](GRAPH_SLAM_GUIDE.md) | Pose graphs, information matrices, loop closure |
+| [EKF_GUIDE.md](EKF_GUIDE.md) | Kalman filter background — not used by the current system |
+| [CHASSIS.md](CHASSIS.md) | Chassis design, printing, wiring |
 
 ## License
 
