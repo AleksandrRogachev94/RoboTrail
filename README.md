@@ -3,7 +3,7 @@
 A 3D-printed Raspberry Pi robot that maps a room by itself — pose-graph SLAM, frontier exploration, and a single laser rangefinder on a servo, written from scratch in numpy and scipy. No ROS, no gmapping, no Cartographer.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" alt="RoboTrail demo — The robot exploring a room" width="100%">
+  <video src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" controls autoplay loop muted playsinline width="100%"></video>
 </p>
 
 _Autonomous run: the robot picks a frontier, drives to it, stops, sweeps the room, folds the scan into the pose graph, and repeats — camera streaming the whole time._
@@ -21,20 +21,20 @@ Localization is **pose-graph based, not filter based**. There's no EKF or partic
 ## Hardware
 
 <p align="center">
-  <img src="robotrail.jpg" alt="RoboTrail — Pi 5, camera, buck converter and ToF laser on the top plate" width="560">
+  <img src="hardware.webp" alt="RoboTrail — Pi 5, camera, buck converter and ToF laser on the top plate" width="560">
 </p>
 
-| Part | Notes |
-| --- | --- |
-| Raspberry Pi 5 | Runs everything on-board — SLAM, motor control, and the web server |
-| Custom 3D-printed chassis | Two-tier round platform, ~155 mm across, SMARS-style tank treads |
-| N20 motors + TB6612FNG | 1 kHz software PWM; quadrature encoders counted by the kernel `rotary-encoder` overlay and read over `evdev`, since Python polling drops ticks |
-| VL53L1X ToF | Short-range mode, 50 ms timing budget. Readings past 250 cm are treated as "nothing there" rather than as hits |
-| SG90 servo | Hardware PWM on GPIO 18 — software PWM jitters under load and smears the scan |
-| MPU-6050 | Gyro Z only, integrated at 50 Hz for heading; bias re-calibrated before every move |
-| Pi Camera v3 | MJPEG stream to the dashboard, on a [printed mount](cad/pi_camera_v3_mount.scad) |
-| KY-008 laser | Debug aid — shows where the ToF is actually pointing |
-| 2S LiPo + XL4015 | 7.4 V pack, bucked down to 5 V |
+| Part                      | Notes                                                                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raspberry Pi 5            | Runs everything on-board — SLAM, motor control, and the web server                                                                             |
+| Custom 3D-printed chassis | Two-tier round platform, ~155 mm across, SMARS-style tank treads                                                                               |
+| N20 motors + TB6612FNG    | 1 kHz software PWM; quadrature encoders counted by the kernel `rotary-encoder` overlay and read over `evdev`, since Python polling drops ticks |
+| VL53L1X ToF               | Short-range mode, 50 ms timing budget. Readings past 250 cm are treated as "nothing there" rather than as hits                                 |
+| SG90 servo                | Hardware PWM on GPIO 18 — software PWM jitters under load and smears the scan                                                                  |
+| MPU-6050                  | Gyro Z only, integrated at 50 Hz for heading; bias re-calibrated before every move                                                             |
+| Pi Camera v3              | MJPEG stream to the dashboard, on a [printed mount](cad/pi_camera_v3_mount.scad)                                                               |
+| KY-008 laser              | Debug aid — shows where the ToF is actually pointing                                                                                           |
+| 2S LiPo + XL4015          | 7.4 V pack, bucked down to 5 V                                                                                                                 |
 
 Chassis dimensions, wiring, and I2C addresses are in [CHASSIS.md](CHASSIS.md).
 
@@ -75,13 +75,13 @@ Most modules run standalone off-robot — see the `*_test.py` file next to each 
 
 ## Docs
 
-|  |  |
-| --- | --- |
-| [LEARNING_PATH.md](LEARNING_PATH.md) | The full stage-by-stage build log, dead reckoning through visual SLAM |
-| [ICM_SCAN_MATCHING.md](ICM_SCAN_MATCHING.md) | ICP from first principles |
-| [GRAPH_SLAM_GUIDE.md](GRAPH_SLAM_GUIDE.md) | Pose graphs, information matrices, loop closure |
-| [EKF_GUIDE.md](EKF_GUIDE.md) | Kalman filter background — not used by the current system |
-| [CHASSIS.md](CHASSIS.md) | Chassis design, printing, wiring |
+|                                              |                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| [LEARNING_PATH.md](LEARNING_PATH.md)         | The full stage-by-stage build log, dead reckoning through visual SLAM |
+| [ICM_SCAN_MATCHING.md](ICM_SCAN_MATCHING.md) | ICP from first principles                                             |
+| [GRAPH_SLAM_GUIDE.md](GRAPH_SLAM_GUIDE.md)   | Pose graphs, information matrices, loop closure                       |
+| [EKF_GUIDE.md](EKF_GUIDE.md)                 | Kalman filter background — not used by the current system             |
+| [CHASSIS.md](CHASSIS.md)                     | Chassis design, printing, wiring                                      |
 
 ## License
 
