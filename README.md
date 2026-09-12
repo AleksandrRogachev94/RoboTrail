@@ -1,6 +1,6 @@
 # RoboTrail 🤖
 
-A 3D-printed Raspberry Pi robot that maps a room by itself — pose-graph SLAM, frontier exploration, and a single laser rangefinder on a servo, written from scratch in numpy and scipy. No ROS, no gmapping, no Cartographer.
+A Raspberry Pi robot that maps a room by itself, built from parts rather than from a kit — pose-graph SLAM, frontier exploration, and a single time-of-flight rangefinder on a hobby servo standing in for a lidar. No ROS, no gmapping, no Cartographer.
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/6f5a3e32-c5a6-42ae-8448-716495ea4b60" controls autoplay loop muted playsinline width="100%"></video>
@@ -10,7 +10,9 @@ _Autonomous run: the robot picks a frontier, drives to it, stops, sweeps the roo
 
 ## What it actually does
 
-There's no lidar here. The "lidar" is one VL53L1X time-of-flight sensor on a servo, taking 80 readings across a 180° arc every time the robot stops. That's a sparse, noisy, half-blind view of the room, which makes everything downstream harder — and is most of what makes the project interesting.
+There's no lidar here. The "lidar" is one VL53L1X time-of-flight sensor on a servo, taking 80 readings across a 180° arc every time the robot stops. Against a real spinning scanner that's a sparse, noisy, half-blind view of the room — it costs a rounding error of what a lidar does, and it makes everything downstream harder. That difficulty is most of what makes the project interesting.
+
+Nothing came out of a box. Components were picked one at a time and wired by hand, the chassis and camera mount were modelled in CAD and printed, and every algorithm below — scan matching, the graph optimizer, the exploration planner — is written directly against numpy and scipy rather than pulled from a SLAM library.
 
 The loop is stop-and-scan: drive one waypoint, stop, sweep, match the scan against the previous one, record it as a node in a pose graph, optimize the graph, rebuild the map from the corrected poses, pick the next frontier.
 
